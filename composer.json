@@ -1,0 +1,13 @@
+{
+    "name": "clasificador/tablas-buscador",
+    "description": "Buscador de tablas en base de datos por patrón",
+    "type": "project",
+    "require": {
+        "php": ">=7.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}

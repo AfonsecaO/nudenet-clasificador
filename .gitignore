@@ -1,0 +1,26 @@
+# Dependencias
+/vendor/
+
+# IDEs / editores
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs
+*.log
+
+# Datos por workspace (imágenes, BD, caché, avatares)
+/workspaces/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Configuración local (si se usa en el futuro)
+.env
+.env.local
+.env.*.local
+
+# PHP
+.phpunit.result.cache
+/coverage/
