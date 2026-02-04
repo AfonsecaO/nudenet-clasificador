@@ -33,7 +33,7 @@ function pct($n, $d): int {
 </nav>
 
 <main class="main content">
-  <div class="container-fluid">
+  <div class="container-fluid" data-db-mode="<?php echo $isDbMode ? '1' : '0'; ?>">
 
     <div id="esperePorFavor" class="espere-por-favor-overlay" style="display: none;" aria-live="polite" aria-busy="true">
       <div class="espere-por-favor-box">
@@ -44,8 +44,48 @@ function pct($n, $d): int {
 
     <!-- 3 columnas: 3 (clasificación) | 6 (buscadores) | 3 (subir + log) -->
     <div class="row dashboard-columns">
-      <!-- Columna izquierda: Clasificación -->
+      <!-- Columna izquierda: Acciones + Clasificación -->
       <div class="col-lg-3 col-md-12 mb-3">
+        <!-- Contenedor único con todos los botones organizados por título -->
+        <div class="card card-acciones mb-3">
+          <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-bolt"></i> Acciones</h3>
+          </div>
+          <div class="card-body acciones-card-body">
+            <div class="acciones-block">
+              <div class="acciones-block-header">
+                <span class="acciones-block-title"><i class="fas fa-robot"></i> Clasificar imagenes</span>
+                <div class="custom-control custom-switch toggle-auto" title="Auto clasificación">
+                  <input type="checkbox" class="custom-control-input" id="switchAuto" autocomplete="off">
+                  <label class="custom-control-label" for="switchAuto">Auto</label>
+                </div>
+              </div>
+            </div>
+            <div class="acciones-block acciones-section-tablas" id="accionesSectionTablas">
+              <div class="acciones-block-header">
+                <span class="acciones-block-title"><i class="fas fa-database"></i> Descargar registros</span>
+                <div class="custom-control custom-switch toggle-auto" title="Auto tablas">
+                  <input type="checkbox" class="custom-control-input" id="switchAutoTablas" autocomplete="off">
+                  <label class="custom-control-label" for="switchAutoTablas">Auto</label>
+                </div>
+              </div>
+            </div>
+            <div class="acciones-block acciones-block-mantenimiento">
+              <div class="acciones-block-header">
+                <span class="acciones-block-title"><i class="fas fa-tools"></i> Mantenimiento</span>
+              </div>
+              <div class="acciones-block-actions">
+                <button class="btn btn-accion-mant" id="btnReset" type="button">
+                  <i class="fas fa-undo btn-icon"></i> Reset
+                </button>
+                <button class="btn btn-accion-mant btn-accion-mant-secondary" id="btnReindex" type="button">
+                  <i class="fas fa-broom btn-icon"></i> Reindexar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="card card-dashboard h-100">
           <div class="card-header">
             <h3 class="card-title"><i class="fas fa-robot"></i> Clasificación de imágenes</h3>
@@ -70,28 +110,6 @@ function pct($n, $d): int {
                 <span class="clasif-legend-safe"><b id="txtSafe">—</b> <span class="clasif-legend-label">Safe</span></span>
               </div>
             </section>
-            <div class="clasif-actions">
-              <div class="clasif-actions-primary">
-                <button class="btn btn-action btn-primary" id="btnProcesarUno" type="button">
-                  <i class="fas fa-play btn-icon"></i> Procesar siguiente
-                </button>
-                <div class="custom-control custom-switch toggle-auto clasif-auto-switch" title="Auto clasificación">
-                  <input type="checkbox" class="custom-control-input" id="switchAuto" autocomplete="off">
-                  <label class="custom-control-label" for="switchAuto">Auto</label>
-                </div>
-              </div>
-              <div class="clasif-actions-secondary">
-                <span class="clasif-actions-secondary-label">Mantenimiento</span>
-                <div class="clasif-actions-btns">
-                  <button class="btn btn-action btn-outline-danger btn-sm" id="btnReset" type="button">
-                    <i class="fas fa-undo btn-icon"></i> Reset
-                  </button>
-                  <button class="btn btn-action btn-outline-secondary btn-sm" id="btnReindex" type="button">
-                    <i class="fas fa-broom btn-icon"></i> Reindexar
-                  </button>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -126,17 +144,23 @@ function pct($n, $d): int {
               </div>
               <div class="acordeon-body">
                 <div class="acordeon-body-inner buscador-etiquetas-inner">
-                  <div class="form-group mb-3 buscador-umbral-wrap">
-                    <label for="rngUmbral" class="buscador-umbral-label">
-                      <i class="fas fa-sliders-h text-muted mr-1"></i> Umbral de confianza: <strong class="text-monospace" id="lblUmbral">80</strong>%
-                    </label>
-                    <input type="range" class="custom-range buscador-umbral-slider" id="rngUmbral" min="0" max="100" step="1" value="80">
+                  <div class="buscador-umbral-wrap">
+                    <div class="buscador-umbral-track-wrap">
+                      <input type="range" class="custom-range buscador-umbral-slider" id="rngUmbral" min="0" max="100" step="1" value="80" aria-label="Umbral">
+                      <span class="buscador-umbral-circle" id="lblUmbral" aria-hidden="true">80%</span>
+                    </div>
                   </div>
-                  <div class="form-group mb-2">
+                  <div class="buscador-tags-wrap">
                     <div id="tagsEtiquetas" class="tags-etiquetas d-flex flex-wrap"></div>
-                    <div id="tagsEtiquetasEmpty" class="tags-etiquetas-empty text-muted small mt-1" style="display: none;">Ninguna etiqueta en este rango. Ajusta el umbral.</div>
+                    <div id="tagsEtiquetasEmpty" class="tags-etiquetas-empty" style="display: none;"></div>
                   </div>
-                  <div class="buscador-results-wrap mt-2">
+                  <div class="buscador-results-wrap">
+                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2 wrap-btn-abrir-resultados" id="wrapBtnAbrirResultados" style="display: none;">
+                      <span class="small text-muted" id="txtCountResultadosEtiq"></span>
+                      <button type="button" class="btn btn-sm btn-outline-primary" id="btnAbrirResultadosEnModal" title="Abrir el mismo modal de carpeta pero solo con estas imágenes">
+                        <i class="fas fa-th-large mr-1"></i> Abrir en galería
+                      </button>
+                    </div>
                     <div class="list-group list-group-flex" id="lstResultadosEtiq"></div>
                   </div>
                 </div>
@@ -180,69 +204,55 @@ function pct($n, $d): int {
     </div>
 
     <?php if ($isDbMode): ?>
-      <!-- Tablas (solo DB) -->
+      <!-- Tablas (solo DB): row > card > header + collapse > body con grid -->
       <div class="row">
         <div class="col-12">
           <div class="card" id="cardTablas">
-            <div class="card-header d-flex justify-content-between align-items-center py-2 cursor-pointer" data-toggle="collapse" data-target="#collapseTablas" aria-expanded="false" aria-controls="collapseTablas" id="cardTablasToggle">
+            <div class="card-header d-flex justify-content-between align-items-center py-2 cursor-pointer" data-toggle="collapse" data-target="#collapseTablas" aria-expanded="true" aria-controls="collapseTablas" id="cardTablasToggle">
               <h3 class="card-title mb-0"><i class="fas fa-database"></i> Tablas</h3>
               <i class="fas fa-chevron-down text-muted card-tablas-chevron" id="chevronTablas"></i>
             </div>
-            <div id="collapseTablas" class="collapse">
-                <div class="card-body">
-                  <div class="mb-3">
-                    <div class="action-buttons">
-                      <button class="btn btn-action btn-info btn-sm" id="btnProcesarTabla" type="button">
-                        <i class="fas fa-play btn-icon"></i> Procesar siguiente registro
-                      </button>
-                      <div class="custom-control custom-switch toggle-auto d-inline-flex align-items-center ml-2" title="Auto tablas">
-                        <input type="checkbox" class="custom-control-input" id="switchAutoTablas" autocomplete="off">
-                        <label class="custom-control-label" for="switchAutoTablas">Auto</label>
-                      </div>
+            <div id="collapseTablas" class="collapse show">
+              <div class="card-body tablas-list-wrap">
+                <div class="list-group" id="lstTablas">
+                <?php foreach (($tablasDelEstado ?? []) as $t): ?>
+                  <?php
+                    $e = is_array($estadoProcesamiento ?? null) ? ($estadoProcesamiento[$t] ?? []) : [];
+                    $ultimo = (int)($e['ultimo_id'] ?? 0);
+                    $max = (int)($e['max_id'] ?? 0);
+                    $faltan = (bool)($e['faltan_registros'] ?? true);
+                    $p = pct($ultimo, $max);
+                  ?>
+                  <div class="list-group-item">
+                    <div class="d-flex w-100 justify-content-between">
+                      <h6 class="mb-1 text-monospace"><?php echo h($t); ?></h6>
+                      <small>
+                        <?php if ($faltan): ?>
+                          <span class="badge badge-warning">Pendiente</span>
+                        <?php else: ?>
+                          <span class="badge badge-success">Completada</span>
+                        <?php endif; ?>
+                      </small>
+                    </div>
+                    <div class="small text-muted mb-1">
+                      Último: <?php echo h($ultimo); ?> · Máx: <?php echo h($max); ?>
+                    </div>
+                    <div class="progress progress-sm">
+                      <div class="progress-bar bg-info tblProgress" data-width="<?php echo (int)$p; ?>"></div>
                     </div>
                   </div>
-
-                  <div class="tablas-list-wrap">
-                    <div class="list-group" id="lstTablas">
-                    <?php foreach (($tablasDelEstado ?? []) as $t): ?>
-                      <?php
-                        $e = is_array($estadoProcesamiento ?? null) ? ($estadoProcesamiento[$t] ?? []) : [];
-                        $ultimo = (int)($e['ultimo_id'] ?? 0);
-                        $max = (int)($e['max_id'] ?? 0);
-                        $faltan = (bool)($e['faltan_registros'] ?? true);
-                        $p = pct($ultimo, $max);
-                      ?>
-                      <div class="list-group-item">
-                        <div class="d-flex w-100 justify-content-between">
-                          <h6 class="mb-1 text-monospace"><?php echo h($t); ?></h6>
-                          <small>
-                            <?php if ($faltan): ?>
-                              <span class="badge badge-warning">Pendiente</span>
-                            <?php else: ?>
-                              <span class="badge badge-success">Completada</span>
-                            <?php endif; ?>
-                          </small>
-                        </div>
-                        <div class="small text-muted mb-1">
-                          Último: <?php echo h($ultimo); ?> · Máx: <?php echo h($max); ?>
-                        </div>
-                        <div class="progress progress-sm">
-                          <div class="progress-bar bg-info tblProgress" data-width="<?php echo (int)$p; ?>"></div>
-                        </div>
-                      </div>
-                    <?php endforeach; ?>
-                    <?php if (empty($tablasDelEstado ?? [])): ?>
-                      <div class="list-group-item">
-                        <div class="text-muted">No hay estado de tablas todavía. Revisa la parametrización y/o el patrón.</div>
-                      </div>
-                    <?php endif; ?>
-                    </div>
+                <?php endforeach; ?>
+                <?php if (empty($tablasDelEstado ?? [])): ?>
+                  <div class="list-group-item">
+                    <div class="text-muted">No hay estado de tablas todavía. Revisa la parametrización y/o el patrón.</div>
                   </div>
+                <?php endif; ?>
                 </div>
-            </div>
               </div>
             </div>
           </div>
+        </div>
+      </div>
     <?php endif; ?>
 
 
@@ -286,7 +296,9 @@ function pct($n, $d): int {
           </a>
         </div>
         <div class="mb-2" id="badgesDet"></div>
-        <canvas id="cnv" class="w-100"></canvas>
+        <div class="visor-canvas-wrap" id="visorCanvasWrap">
+          <canvas id="cnv"></canvas>
+        </div>
       </div>
     </div>
   </div>
@@ -321,7 +333,6 @@ function pct($n, $d): int {
   const barSafe = el('barSafe');
 
   const stProcesar = el('stProcesar');
-  const btnProcesarUno = el('btnProcesarUno');
   const switchAuto = document.getElementById('switchAuto');
   const btnReset = el('btnReset');
   const btnReindex = el('btnReindex');
@@ -439,16 +450,29 @@ function pct($n, $d): int {
     return Number(rngUmbral?.value ?? 80);
   }
 
-  function etiquetaInRange(t, umbral) {
-    const min = t.min != null ? Number(t.min) : 0;
+  function aplicarRangoUmbral() {
+    if (!rngUmbral) return;
+    rngUmbral.min = 0;
+    rngUmbral.max = 100;
+  }
+
+  /** Rango por tag: siempre desde 0 hasta max del tag. Se muestra si el umbral está en [0, max]. */
+  function etiquetaIncluyeUmbral(t, umbral) {
     const max = t.max != null ? Number(t.max) : 100;
-    return umbral >= min && umbral <= max;
+    return umbral <= max;
   }
 
   function renderTagsFiltered(umbral) {
     if (!tagsEtiquetas) return;
     const elEmpty = document.getElementById('tagsEtiquetasEmpty');
-    const filtered = allEtiquetas.filter((t) => etiquetaInRange(t, umbral));
+    const umbralNum = Number(umbral);
+    const filtered = umbralNum === 0 ? allEtiquetas : allEtiquetas.filter((t) => etiquetaIncluyeUmbral(t, umbralNum));
+    // Si el tag seleccionado ya no cumple el umbral, deseleccionar y ocultar resultados
+    if (selectedEtiquetaLabel && !filtered.some((t) => String(t.label).trim() === selectedEtiquetaLabel)) {
+      selectedEtiquetaLabel = '';
+      renderResultadosEtiq([]);
+      setStatus(stBuscarEtiq, 'neutral', 'Ajusta el umbral o elige otra etiqueta');
+    }
     tagsEtiquetas.innerHTML = '';
     if (elEmpty) elEmpty.style.display = filtered.length ? 'none' : 'block';
     for (const t of filtered) {
@@ -461,7 +485,7 @@ function pct($n, $d): int {
       const rangeStr = (min != null && max != null && !Number.isNaN(min) && !Number.isNaN(max)) ? ` [${min}–${max}%]` : '';
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'btn btn-sm btn-outline-primary tag-etiqueta mr-1 mb-1';
+      btn.className = 'btn btn-sm btn-outline-primary tag-etiqueta mr-1 mb-1' + (selectedEtiquetaLabel === label ? ' active' : '');
       btn.dataset.label = label;
       const mainText = count != null && !Number.isNaN(count) ? `${displayLabel} (${count})` : displayLabel;
       if (rangeStr) {
@@ -489,24 +513,27 @@ function pct($n, $d): int {
       });
       tagsEtiquetas.appendChild(btn);
     }
-    if (selectedEtiquetaLabel && !filtered.some((t) => String(t.label).trim() === selectedEtiquetaLabel)) {
-      selectedEtiquetaLabel = '';
-      renderResultadosEtiq([]);
-      setStatus(stBuscarEtiq, 'neutral', 'Ajusta el umbral o elige otra etiqueta');
-    }
   }
 
   async function loadEtiquetas() {
     const { ok, data } = await getJson('?action=etiquetas_detectadas');
     if (!ok || !data?.success) return;
     allEtiquetas = Array.isArray(data.etiquetas) ? data.etiquetas : [];
+    aplicarRangoUmbral();
     renderTagsFiltered(getUmbralValue());
   }
+
+  let lastResultadosEtiq = [];
 
   function renderResultadosEtiq(items) {
     if (!lstResultadosEtiq) return;
     lstResultadosEtiq.innerHTML = '';
     const arr = Array.isArray(items) ? items : [];
+    lastResultadosEtiq = arr;
+    const wrapBtn = document.getElementById('wrapBtnAbrirResultados');
+    const txtCount = document.getElementById('txtCountResultadosEtiq');
+    if (wrapBtn) wrapBtn.style.display = arr.length ? 'flex' : 'none';
+    if (txtCount && arr.length) txtCount.textContent = arr.length + ' imagen' + (arr.length !== 1 ? 'es' : '') + ' en esta búsqueda';
     if (!arr.length) {
       const div = document.createElement('div');
       div.className = 'buscador-empty';
@@ -530,12 +557,11 @@ function pct($n, $d): int {
       a.href = '#';
       a.className = 'list-group-item list-group-item-action resultado-etiqueta-item';
       a.innerHTML = `
-        <div class="d-flex w-100 justify-content-between align-items-start">
-          <h6 class="mb-1 text-monospace resultado-etiqueta-ruta">${ruta.replace(/</g,'&lt;')}</h6>
+        <div class="resultado-etiqueta-row">
+          <span class="resultado-etiqueta-ruta text-monospace">${ruta.replace(/</g,'&lt;')}</span>
           ${scorePct !== null ? `<span class="badge badge-pill resultado-etiqueta-score">${scorePct}%</span>` : ''}
         </div>
-        <div class="small text-muted resultado-etiqueta-carpeta">${carpeta ? carpeta.replace(/</g,'&lt;') : ''}</div>
-        ${tagsHtml ? `<div class="resultado-etiqueta-tags mt-1">${tagsHtml}</div>` : ''}
+        ${tagsHtml ? `<div class="resultado-etiqueta-tags">${tagsHtml}</div>` : ''}
       `;
       a.addEventListener('click', async (e) => {
         e.preventDefault();
@@ -548,7 +574,8 @@ function pct($n, $d): int {
 
   async function buscarPorEtiqueta(labelOrForce) {
     const lab = typeof labelOrForce === 'string' ? labelOrForce.trim() : String(selectedEtiquetaLabel || '').trim();
-    const umbral = Number(rngUmbral?.value || 0);
+    const umbralDisplay = Number(rngUmbral?.value || 0);
+    const umbral = umbralDisplay > 0 ? umbralDisplay - 1 : 0;
     if (!lab) {
       setStatus(stBuscarEtiq, 'bad', 'Selecciona una etiqueta (click en un tag)');
       return;
@@ -618,9 +645,7 @@ function pct($n, $d): int {
 
   async function autoLoopImagenes() {
     while (autoRunning) {
-      if (btnProcesarUno) btnProcesarUno.disabled = true;
       try { await procesarUna(); } catch (e) {}
-      if (btnProcesarUno) btnProcesarUno.disabled = false;
       if (!autoRunning) break;
       await new Promise(r => setTimeout(r, 200));
     }
@@ -1146,6 +1171,79 @@ function pct($n, $d): int {
     }
   }
 
+  function renderGridSoloResultadosEtiq(items) {
+    if (!gridThumbs) return;
+    gridThumbs.innerHTML = '';
+    const arr = Array.isArray(items) ? items : [];
+    for (const it of arr) {
+      const rutaRel = String(it?.ruta_relativa || '').trim();
+      const rutaCarpeta = String(it?.ruta_carpeta || '').trim();
+      const archivo = String(it?.archivo || '').trim();
+      const matches = Array.isArray(it?.matches) ? it.matches : [];
+      const tagLabels = matches.map((m) => String(m?.label || '').trim()).filter(Boolean);
+
+      const col = document.createElement('div');
+      col.className = 'col-6 col-sm-4 col-md-3 col-lg-2 mb-3';
+      col.dataset.rutaRelativa = rutaRel;
+      const card = document.createElement('div');
+      card.className = 'thumb-card';
+      const a = document.createElement('a');
+      a.href = '#';
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'thumb-card-img';
+      const img = document.createElement('img');
+      img.alt = archivo;
+      img.loading = 'lazy';
+      img.src = `?action=ver_imagen&ruta=${encodeURIComponent(rutaCarpeta)}&archivo=${encodeURIComponent(archivo)}&thumb=1&w=240`;
+      imgWrap.appendChild(img);
+      a.appendChild(imgWrap);
+      const body = document.createElement('div');
+      body.className = 'thumb-card-body';
+      const title = document.createElement('div');
+      title.className = 'thumb-card-title';
+      title.textContent = archivo || '—';
+      title.title = archivo || '';
+      body.appendChild(title);
+      if (tagLabels.length > 0) {
+        const tagRow = document.createElement('div');
+        tagRow.className = 'thumb-card-tags';
+        for (const lab of tagLabels.slice(0, 5)) {
+          const chip = document.createElement('span');
+          chip.className = 'tag-chip-inline';
+          chip.textContent = tagLabelToFullText(lab).replace(/</g, '\u200b');
+          tagRow.appendChild(chip);
+        }
+        if (tagLabels.length > 5) {
+          const more = document.createElement('span');
+          more.className = 'tag-chip-inline';
+          more.textContent = '+' + (tagLabels.length - 5);
+          tagRow.appendChild(more);
+        }
+        body.appendChild(tagRow);
+      }
+      a.appendChild(body);
+      a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await abrirVisor(rutaCarpeta, archivo, rutaRel);
+      });
+      card.appendChild(a);
+      col.appendChild(card);
+      gridThumbs.appendChild(col);
+    }
+  }
+
+  function abrirModalSoloResultadosEtiq() {
+    if (!lastResultadosEtiq.length) return;
+    if (ttlCarpeta) ttlCarpeta.textContent = 'Resultados de búsqueda (' + lastResultadosEtiq.length + ')';
+    if (tagsCarpeta) tagsCarpeta.innerHTML = '';
+    if (gridThumbs) gridThumbs.innerHTML = '';
+    lastFolder = null;
+    folderFiles = [];
+    folderFilter = 'ALL';
+    if (window.jQuery) window.jQuery('#modalCarpeta').modal('show');
+    renderGridSoloResultadosEtiq(lastResultadosEtiq);
+  }
+
   async function abrirCarpeta(nombre, ruta, selectedImageRutaRelativa) {
     folderSelectedImageRuta = String(selectedImageRutaRelativa || '').trim();
     lastFolder = { nombre: String(nombre || ''), ruta: String(ruta || '') };
@@ -1215,29 +1313,44 @@ function pct($n, $d): int {
     const ctx = cnv.getContext('2d');
     if (!ctx) return;
 
-    cnv.width = img.naturalWidth || img.width || 1;
-    cnv.height = img.naturalHeight || img.height || 1;
-    ctx.clearRect(0, 0, cnv.width, cnv.height);
-    ctx.drawImage(img, 0, 0, cnv.width, cnv.height);
+    const naturalW = img.naturalWidth || img.width || 1;
+    const naturalH = img.naturalHeight || img.height || 1;
+    // Espacio disponible: un poco más pequeño que el viewport (márgenes visibles)
+    const marginW = 160;
+    const marginH = 280;
+    const maxW = Math.max(320, (document.documentElement.clientWidth || window.innerWidth) - marginW);
+    const maxH = Math.max(240, (window.innerHeight || document.documentElement.clientHeight) - marginH);
+    const scale = Math.min(maxW / naturalW, maxH / naturalH);
+    const displayW = Math.round(naturalW * scale);
+    const displayH = Math.round(naturalH * scale);
+
+    cnv.width = displayW;
+    cnv.height = displayH;
+    ctx.clearRect(0, 0, displayW, displayH);
+    ctx.drawImage(img, 0, 0, naturalW, naturalH, 0, 0, displayW, displayH);
 
     if (!show) return;
 
     const dets = Array.isArray(visor.detections) ? visor.detections : [];
-    ctx.lineWidth = Math.max(2, Math.round(cnv.width / 600));
-    ctx.font = `${Math.max(14, Math.round(cnv.width / 60))}px "Source Sans Pro", sans-serif`;
+    const lineW = Math.max(1.5, displayW / 600);
+    const fontSize = Math.max(12, displayW / 60);
+    ctx.lineWidth = lineW;
+    ctx.font = `${Math.round(fontSize)}px "Source Sans Pro", sans-serif`;
     for (const d of dets) {
       const box = Array.isArray(d?.box) ? d.box : null;
       if (!box || box.length !== 4) continue;
       const x1 = Number(box[0] || 0), y1 = Number(box[1] || 0), x2 = Number(box[2] || 0), y2 = Number(box[3] || 0);
-      const w = Math.max(1, x2 - x1);
-      const h = Math.max(1, y2 - y1);
+      const w = Math.max(1, (x2 - x1) * scale);
+      const h = Math.max(1, (y2 - y1) * scale);
+      const sx1 = x1 * scale;
+      const sy1 = y1 * scale;
       ctx.strokeStyle = '#dc3545';
-      ctx.strokeRect(x1, y1, w, h);
+      ctx.strokeRect(sx1, sy1, w, h);
       const label = String(d?.label || '').trim();
       const score = Number(d?.score || 0);
       const text = label ? `${label} ${score.toFixed(3)}` : score.toFixed(3);
       ctx.fillStyle = '#dc3545';
-      ctx.fillText(text, x1 + 4, Math.max(14, y1 - 6));
+      ctx.fillText(text, sx1 + 4, Math.max(fontSize + 2, sy1 - 4));
     }
   }
 
@@ -1385,13 +1498,16 @@ function pct($n, $d): int {
   }
 
   // Wire events
-  if (btnProcesarUno) btnProcesarUno.addEventListener('click', procesarUna);
   if (switchAuto) switchAuto.addEventListener('change', () => setAuto(switchAuto.checked));
   if (btnReset) btnReset.addEventListener('click', resetAll);
   if (btnReindex) btnReindex.addEventListener('click', reindexAll);
 
   if (rngUmbral && lblUmbral) {
-    const sync = () => (lblUmbral.textContent = String(rngUmbral.value || '0'));
+    const sync = () => {
+      const val = String(rngUmbral.value || '0');
+      lblUmbral.textContent = val + '%';
+      lblUmbral.style.setProperty('--umbral-pct', val + '%');
+    };
     sync();
     rngUmbral.addEventListener('input', () => {
       sync();
@@ -1401,6 +1517,9 @@ function pct($n, $d): int {
       buscarEtiqTimer = setTimeout(() => buscarPorEtiqueta(false), 450);
     });
   }
+  const btnAbrirResultadosEnModal = document.getElementById('btnAbrirResultadosEnModal');
+  if (btnAbrirResultadosEnModal) btnAbrirResultadosEnModal.addEventListener('click', abrirModalSoloResultadosEtiq);
+
   // Búsqueda de carpetas: automática solo con mínimo 3 caracteres; botón "Buscar" para búsqueda bajo demanda (sin mínimo)
   const MIN_CARACTERES_AUTO = 3;
   let buscarCarpetaTimer = null;
@@ -1475,9 +1594,11 @@ function pct($n, $d): int {
   if (window.jQuery) {
     window.jQuery('#modalVisor').on('shown.bs.modal', () => drawCanvas());
   }
+  window.addEventListener('resize', () => {
+    if (modalVisor && modalVisor.classList.contains('show')) drawCanvas();
+  });
 
   // Tablas auto (solo si existe)
-  const btnProcesarTabla = document.getElementById('btnProcesarTabla');
   const switchAutoTablas = document.getElementById('switchAutoTablas');
   const stTablas = document.getElementById('stTablas');
 
@@ -1571,9 +1692,7 @@ function pct($n, $d): int {
 
   async function autoLoopTablas() {
     while (autoTablasRunning) {
-      if (btnProcesarTabla) btnProcesarTabla.disabled = true;
       try { await procesarTablaUna(); } catch (e) {}
-      if (btnProcesarTabla) btnProcesarTabla.disabled = false;
       if (!autoTablasRunning) break;
       await new Promise(r => setTimeout(r, 200));
     }
@@ -1596,7 +1715,6 @@ function pct($n, $d): int {
     autoLoopTablas();
   }
 
-  if (btnProcesarTabla) btnProcesarTabla.addEventListener('click', procesarTablaUna);
   if (switchAutoTablas) switchAutoTablas.addEventListener('change', () => setAutoTablas(switchAutoTablas.checked));
 
   // Log de procesamiento (actualización solo en momentos clave, sin polling)
