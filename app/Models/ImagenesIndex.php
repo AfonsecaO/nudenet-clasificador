@@ -53,7 +53,9 @@ class ImagenesIndex
     {
         $label = trim($label);
         if ($label === '') return '';
-        return strtoupper($label);
+        $label = strtoupper($label);
+        $label = preg_replace('/\s+/', '_', $label);
+        return $label;
     }
 
     private function obtenerUmbralClasificacion(): float
@@ -649,11 +651,14 @@ class ImagenesIndex
         if (empty($labelsNorm)) return [];
 
         $placeholders = implode(',', array_fill(0, count($labelsNorm), '?'));
+        // Label normalizado: mayúsculas y espacios → _ (coincide aunque en BD esté "BELLY EXPOSED" o "belly_exposed")
+        $labelCondition = "UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)";
+        // Comparación directa por score (sin ROUND) como antes
         $stmtTop = $this->pdo->prepare("
-            SELECT image_ruta_relativa, MAX(score) as best_score
-            FROM detections
-            WHERE label IN ($placeholders) AND score >= ?
-            GROUP BY image_ruta_relativa
+            SELECT d.image_ruta_relativa, MAX(d.score) as best_score
+            FROM detections d
+            WHERE $labelCondition AND d.score >= ?
+            GROUP BY d.image_ruta_relativa
             ORDER BY best_score DESC
             LIMIT " . self::MAX_RESULTADOS_BUSQUEDA_ETIQUETAS . "
         ");
@@ -665,6 +670,17 @@ class ImagenesIndex
         $bestByKey = [];
         foreach ($top as $r) $bestByKey[(string)$r['image_ruta_relativa']] = (float)$r['best_score'];
 
+        // Solo mantener imágenes que existan en el índice (evitar huérfanas)
+        $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
+        $stmtExists = $this->pdo->prepare("SELECT ruta_relativa FROM images WHERE ruta_relativa IN ($ph2)");
+        $stmtExists->execute($imageKeys);
+        $existingKeys = [];
+        while ($row = $stmtExists->fetch(\PDO::FETCH_NUM)) {
+            $existingKeys[(string)$row[0]] = true;
+        }
+        $imageKeys = array_values(array_filter($imageKeys, fn($k) => !empty($existingKeys[$k])));
+        if (empty($imageKeys)) return [];
+
         $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
         $stmtInfo = $this->pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM images WHERE ruta_relativa IN ($ph2)");
         $stmtInfo->execute($imageKeys);
@@ -673,12 +689,12 @@ class ImagenesIndex
         foreach ($infoRows as $r) $infoByKey[(string)$r['ruta_relativa']] = $r;
 
         $stmtMatches = $this->pdo->prepare("
-            SELECT image_ruta_relativa, label, MAX(score) as score
-            FROM detections
-            WHERE image_ruta_relativa IN ($ph2)
-              AND label IN ($placeholders)
-              AND score >= ?
-            GROUP BY image_ruta_relativa, label
+            SELECT d.image_ruta_relativa, d.label, MAX(d.score) as score
+            FROM detections d
+            WHERE d.image_ruta_relativa IN ($ph2)
+              AND UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)
+              AND d.score >= ?
+            GROUP BY d.image_ruta_relativa, d.label
         ");
         $stmtMatches->execute(array_merge($imageKeys, $labelsNorm, [$umbral]));
         $matchRows = $stmtMatches->fetchAll();
