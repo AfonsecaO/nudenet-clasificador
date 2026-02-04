@@ -613,14 +613,24 @@ class ImagenesIndex
     public function getEtiquetasDetectadas(bool $recalcularSiInconsistente = true): array
     {
         $rows = $this->pdo->query("
-            SELECT label, COUNT(DISTINCT image_ruta_relativa) as c
+            SELECT label,
+                   COUNT(DISTINCT image_ruta_relativa) as c,
+                   MIN(score) as min_score,
+                   MAX(score) as max_score
             FROM detections
             GROUP BY label
             ORDER BY c DESC, label ASC
         ")->fetchAll();
         $out = [];
         foreach ($rows as $r) {
-            $out[] = ['label' => (string)$r['label'], 'count' => (int)$r['c']];
+            $minScore = isset($r['min_score']) ? (float)$r['min_score'] : 0;
+            $maxScore = isset($r['max_score']) ? (float)$r['max_score'] : 0;
+            $out[] = [
+                'label' => (string)$r['label'],
+                'count' => (int)$r['c'],
+                'min' => (int)round($minScore * 100),
+                'max' => (int)round($maxScore * 100),
+            ];
         }
         return $out;
     }

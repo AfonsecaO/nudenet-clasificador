@@ -125,13 +125,16 @@ function pct($n, $d): int {
                 <span><i class="fas fa-tags"></i> Buscar imágenes por etiqueta</span>
               </div>
               <div class="acordeon-body">
-                <div class="acordeon-body-inner">
-                  <div class="form-group mb-2">
-                    <div id="tagsEtiquetas" class="tags-etiquetas d-flex flex-wrap"></div>
+                <div class="acordeon-body-inner buscador-etiquetas-inner">
+                  <div class="form-group mb-3 buscador-umbral-wrap">
+                    <label for="rngUmbral" class="buscador-umbral-label">
+                      <i class="fas fa-sliders-h text-muted mr-1"></i> Umbral de confianza: <strong class="text-monospace" id="lblUmbral">80</strong>%
+                    </label>
+                    <input type="range" class="custom-range buscador-umbral-slider" id="rngUmbral" min="0" max="100" step="1" value="80">
                   </div>
                   <div class="form-group mb-2">
-                    <label for="rngUmbral">Umbral: <span class="text-monospace" id="lblUmbral">50</span>%</label>
-                    <input type="range" class="custom-range" id="rngUmbral" min="0" max="100" step="1" value="50">
+                    <div id="tagsEtiquetas" class="tags-etiquetas d-flex flex-wrap"></div>
+                    <div id="tagsEtiquetasEmpty" class="tags-etiquetas-empty text-muted small mt-1" style="display: none;">Ninguna etiqueta en este rango. Ajusta el umbral.</div>
                   </div>
                   <div class="buscador-results-wrap mt-2">
                     <div class="list-group list-group-flex" id="lstResultadosEtiq"></div>
@@ -430,23 +433,46 @@ function pct($n, $d): int {
   }
 
   let selectedEtiquetaLabel = '';
+  let allEtiquetas = []; // { label, count, min, max } desde el backend
 
-  async function loadEtiquetas() {
-    const { ok, data } = await getJson('?action=etiquetas_detectadas');
-    if (!ok || !data?.success) return;
-    const etiquetas = Array.isArray(data.etiquetas) ? data.etiquetas : [];
+  function getUmbralValue() {
+    return Number(rngUmbral?.value ?? 80);
+  }
+
+  function etiquetaInRange(t, umbral) {
+    const min = t.min != null ? Number(t.min) : 0;
+    const max = t.max != null ? Number(t.max) : 100;
+    return umbral >= min && umbral <= max;
+  }
+
+  function renderTagsFiltered(umbral) {
     if (!tagsEtiquetas) return;
+    const elEmpty = document.getElementById('tagsEtiquetasEmpty');
+    const filtered = allEtiquetas.filter((t) => etiquetaInRange(t, umbral));
     tagsEtiquetas.innerHTML = '';
-    for (const t of etiquetas) {
+    if (elEmpty) elEmpty.style.display = filtered.length ? 'none' : 'block';
+    for (const t of filtered) {
       const label = (t && typeof t === 'object' && t.label != null) ? String(t.label).trim() : '';
       if (!label) continue;
       const count = (t && typeof t === 'object' && t.count != null) ? Number(t.count) : null;
+      const min = t.min != null ? Number(t.min) : null;
+      const max = t.max != null ? Number(t.max) : null;
       const displayLabel = tagLabelToFullText(label);
+      const rangeStr = (min != null && max != null && !Number.isNaN(min) && !Number.isNaN(max)) ? ` [${min}–${max}%]` : '';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn btn-sm btn-outline-primary tag-etiqueta mr-1 mb-1';
       btn.dataset.label = label;
-      btn.textContent = count != null && !Number.isNaN(count) ? `${displayLabel} (${count})` : displayLabel;
+      const mainText = count != null && !Number.isNaN(count) ? `${displayLabel} (${count})` : displayLabel;
+      if (rangeStr) {
+        const spanRange = document.createElement('span');
+        spanRange.className = 'tag-range';
+        spanRange.textContent = rangeStr;
+        btn.appendChild(document.createTextNode(mainText));
+        btn.appendChild(spanRange);
+      } else {
+        btn.textContent = mainText;
+      }
       btn.addEventListener('click', () => {
         const yaSeleccionado = selectedEtiquetaLabel === label;
         if (yaSeleccionado) {
@@ -463,6 +489,18 @@ function pct($n, $d): int {
       });
       tagsEtiquetas.appendChild(btn);
     }
+    if (selectedEtiquetaLabel && !filtered.some((t) => String(t.label).trim() === selectedEtiquetaLabel)) {
+      selectedEtiquetaLabel = '';
+      renderResultadosEtiq([]);
+      setStatus(stBuscarEtiq, 'neutral', 'Ajusta el umbral o elige otra etiqueta');
+    }
+  }
+
+  async function loadEtiquetas() {
+    const { ok, data } = await getJson('?action=etiquetas_detectadas');
+    if (!ok || !data?.success) return;
+    allEtiquetas = Array.isArray(data.etiquetas) ? data.etiquetas : [];
+    renderTagsFiltered(getUmbralValue());
   }
 
   function renderResultadosEtiq(items) {
@@ -483,20 +521,21 @@ function pct($n, $d): int {
       const matches = Array.isArray(it?.matches) ? it.matches : [];
       const tagsHtml = matches.slice(0, 10).map(m => {
         const lab = String(m?.label || '').replace(/</g, '&lt;');
-        const sc = (m?.score !== undefined && m?.score !== null) ? Number(m.score).toFixed(2) : '';
-        return `<span class="badge badge-light mr-1 mb-1">${lab}${sc ? ' ' + sc : ''}</span>`;
+        const sc = (m?.score !== undefined && m?.score !== null) ? Math.round(Number(m.score) * 100) : '';
+        return `<span class="badge badge-light mr-1 mb-1">${lab}${sc !== '' ? ' ' + sc + '%' : ''}</span>`;
       }).join('');
 
+      const scorePct = bestScore !== null && !Number.isNaN(bestScore) ? Math.round(bestScore * 100) : null;
       const a = document.createElement('a');
       a.href = '#';
-      a.className = 'list-group-item list-group-item-action';
+      a.className = 'list-group-item list-group-item-action resultado-etiqueta-item';
       a.innerHTML = `
-        <div class="d-flex w-100 justify-content-between">
-          <h6 class="mb-1 text-monospace">${ruta.replace(/</g,'&lt;')}</h6>
-          ${bestScore !== null && !Number.isNaN(bestScore) ? `<small class="text-muted">score ${bestScore.toFixed(2)}</small>` : ''}
+        <div class="d-flex w-100 justify-content-between align-items-start">
+          <h6 class="mb-1 text-monospace resultado-etiqueta-ruta">${ruta.replace(/</g,'&lt;')}</h6>
+          ${scorePct !== null ? `<span class="badge badge-pill resultado-etiqueta-score">${scorePct}%</span>` : ''}
         </div>
-        <div class="small text-muted">${carpeta ? carpeta.replace(/</g,'&lt;') : ''}</div>
-        ${tagsHtml ? `<div class="mt-1">${tagsHtml}</div>` : ''}
+        <div class="small text-muted resultado-etiqueta-carpeta">${carpeta ? carpeta.replace(/</g,'&lt;') : ''}</div>
+        ${tagsHtml ? `<div class="resultado-etiqueta-tags mt-1">${tagsHtml}</div>` : ''}
       `;
       a.addEventListener('click', async (e) => {
         e.preventDefault();
@@ -1356,6 +1395,8 @@ function pct($n, $d): int {
     sync();
     rngUmbral.addEventListener('input', () => {
       sync();
+      const umbral = getUmbralValue();
+      renderTagsFiltered(umbral);
       if (buscarEtiqTimer) clearTimeout(buscarEtiqTimer);
       buscarEtiqTimer = setTimeout(() => buscarPorEtiqueta(false), 450);
     });
