@@ -45,7 +45,7 @@ function pct($n, $d): int {
     <!-- 3 columnas: 3 (acciones + clasificación con subir) | 6 (buscadores) | 3 (log) -->
     <div class="row dashboard-columns">
       <!-- Columna izquierda: Acciones + Clasificación -->
-      <div class="col-lg-3 col-md-12 mb-3">
+      <div class="col-lg-3 col-md-12 mb-3 col-clasif">
         <!-- Contenedor único con todos los botones organizados por título -->
         <div class="card card-acciones mb-3">
           <div class="card-header card-header-normalized">
@@ -86,7 +86,7 @@ function pct($n, $d): int {
           </div>
         </div>
 
-        <div class="card card-dashboard card-clasif h-100">
+        <div class="card card-dashboard card-clasif card-clasif-fill">
           <div class="card-header card-header-normalized">
             <h3 class="card-title"><i class="fas fa-robot" aria-hidden="true"></i> Clasificación de imágenes</h3>
           </div>
