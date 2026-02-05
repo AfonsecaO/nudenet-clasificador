@@ -1808,8 +1808,8 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 /* hr */
 hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
-/* Página Workspaces */
-.page-workspaces .container { max-width: 1000px; }
+/* Página Workspaces — 4 por fila, tarjetas más grandes */
+.page-workspaces .container { max-width: 1680px; }
 .workspaces-header { margin-bottom: 2rem; }
 .workspaces-title {
   font-size: 1.5rem;
@@ -1840,33 +1840,33 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
 .workspace-card {
   height: 100%;
-  min-height: 320px;
+  min-height: 360px;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .workspace-card:hover { box-shadow: var(--shadow-md); }
 .workspace-card--current { border-left: 4px solid var(--info); }
-.workspace-card-header { padding: 1rem 1.25rem; background: var(--bg-page); border-bottom: 1px solid var(--border); }
-.workspace-card-icon { margin-right: 0.5rem; font-size: 1.25rem; }
-.workspace-card-title { font-size: 1.125rem; font-weight: 600; }
-.workspace-card .card-body { padding: 1.25rem 1.25rem; }
-.workspace-card-path { word-break: break-all; font-size: 0.875rem; }
+.workspace-card-header { padding: 1.25rem 1.5rem; background: var(--bg-page); border-bottom: 1px solid var(--border); }
+.workspace-card-icon { margin-right: 0.5rem; font-size: 1.35rem; }
+.workspace-card-title { font-size: 1.25rem; font-weight: 600; }
+.workspace-card .card-body { padding: 1.5rem 1.5rem; }
+.workspace-card-path { word-break: break-all; font-size: 0.9375rem; }
 .workspace-card-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.75rem 1rem;
-  margin-top: 1rem;
+  gap: 0.875rem 1.25rem;
+  margin-top: 1.25rem;
 }
 .workspace-stat {
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 1rem;
+  padding: 0.875rem 1.25rem;
   background: var(--bg-page);
   border-radius: var(--radius-sm);
 }
-.workspace-stat-value { font-weight: 600; font-size: 1.25rem; color: var(--text); }
-.workspace-stat-label { font-size: 0.8125rem; color: var(--text-muted); margin-top: 0.25rem; }
-.workspace-card-meta { font-size: 0.8125rem; margin-top: 1rem; }
-.workspace-card-footer { padding: 1rem 1.25rem; }
-.workspace-card-footer .btn { padding: 0.4rem 0.9rem; }
+.workspace-stat-value { font-weight: 600; font-size: 1.375rem; color: var(--text); }
+.workspace-stat-label { font-size: 0.875rem; color: var(--text-muted); margin-top: 0.25rem; }
+.workspace-card-meta { font-size: 0.875rem; margin-top: 1.25rem; }
+.workspace-card-footer { padding: 1.25rem 1.5rem; }
+.workspace-card-footer .btn { padding: 0.5rem 1rem; font-size: 0.9375rem; }

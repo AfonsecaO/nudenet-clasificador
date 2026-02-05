@@ -60,7 +60,7 @@ function fmtTs($ts): string {
           $modeLabel = ($mode === 'db_and_images') ? 'DB + imágenes' : (($mode === 'images_only') ? 'Solo imágenes' : 'Sin configurar');
           $statusLabel = $configured ? 'Configurado' : 'Pendiente';
         ?>
-        <div class="col-12 col-lg-6 mb-4">
+        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-4">
           <div class="card workspace-card<?php echo $isCurrent ? ' workspace-card--current' : ''; ?>">
             <div class="card-header workspace-card-header d-flex align-items-center justify-content-between">
               <div class="d-flex align-items-center min-w-0">
