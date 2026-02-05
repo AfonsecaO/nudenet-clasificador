@@ -1406,6 +1406,20 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   gap: 1rem;
   min-width: 0;
 }
+/* Columna izquierda: Acciones + Clasificación — card de clasificación ocupa el alto restante */
+.dashboard-columns .col-clasif {
+  min-height: 0;
+  overflow: hidden;
+}
+.dashboard-columns .col-clasif .card-acciones { flex-shrink: 0; }
+.dashboard-columns .col-clasif .card-clasif-fill {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Columna centro: un solo contenedor que llena el alto y lleva acordeón */
 .dashboard-columns .col-buscadores {
   min-height: 0;
