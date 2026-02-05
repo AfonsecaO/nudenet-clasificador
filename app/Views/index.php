@@ -42,14 +42,14 @@ function pct($n, $d): int {
       </div>
     </div>
 
-    <!-- 3 columnas: 3 (clasificación) | 6 (buscadores) | 3 (subir + log) -->
+    <!-- 3 columnas: 3 (acciones + clasificación con subir) | 6 (buscadores) | 3 (log) -->
     <div class="row dashboard-columns">
       <!-- Columna izquierda: Acciones + Clasificación -->
       <div class="col-lg-3 col-md-12 mb-3">
         <!-- Contenedor único con todos los botones organizados por título -->
         <div class="card card-acciones mb-3">
-          <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-bolt"></i> Acciones</h3>
+          <div class="card-header card-header-normalized">
+            <h3 class="card-title"><i class="fas fa-bolt" aria-hidden="true"></i> Acciones</h3>
           </div>
           <div class="card-body acciones-card-body">
             <div class="acciones-block">
@@ -86,29 +86,45 @@ function pct($n, $d): int {
           </div>
         </div>
 
-        <div class="card card-dashboard h-100">
-          <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-robot"></i> Clasificación de imágenes</h3>
+        <div class="card card-dashboard card-clasif h-100">
+          <div class="card-header card-header-normalized">
+            <h3 class="card-title"><i class="fas fa-robot" aria-hidden="true"></i> Clasificación de imágenes</h3>
           </div>
           <div class="card-body clasif-card-body">
-            <section class="clasif-progress-block">
+            <section class="clasif-progress-block" aria-label="Progreso de clasificación">
               <div class="clasif-progress-header">
                 <span class="clasif-progress-title">Progreso</span>
-                <span class="clasif-progress-count"><b id="txtProcesadas">—</b><span class="clasif-progress-sep">/</span><span id="txtTotal">—</span></span>
+                <span class="clasif-progress-count" aria-live="polite">
+                  <b id="txtProcesadas">—</b><span class="clasif-progress-sep" aria-hidden="true">/</span><span id="txtTotal">—</span>
+                </span>
               </div>
-              <div class="clasif-bar-track">
-                <div class="clasif-bar-fill" id="barProcesadas" data-width="0"></div>
+              <div class="clasif-bar-track" role="presentation">
+                <div class="clasif-bar-fill" id="barProcesadas" data-width="0" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
               </div>
             </section>
-            <section class="clasif-safe-unsafe">
-              <div class="clasif-safe-unsafe-bar" id="progressSafeUnsafe">
-                <div class="clasif-bar-unsafe" id="barUnsafe" data-width="0" style="width: 0%"></div>
-                <div class="clasif-bar-safe" id="barSafe" data-width="0" style="width: 0%"></div>
+            <section class="clasif-safe-unsafe" aria-label="Resultados Safe y Unsafe">
+              <div class="clasif-safe-unsafe-inputs">
+                <div class="clasif-input-wrap clasif-input-unsafe">
+                  <input type="text" class="form-control form-control-sm clasif-input-pct" id="txtUnsafe" value="—" placeholder="Unsafe" readonly aria-label="Unsafe">
+                </div>
+                <div class="clasif-input-wrap clasif-input-safe">
+                  <input type="text" class="form-control form-control-sm clasif-input-pct" id="txtSafe" value="—" placeholder="Safe" readonly aria-label="Safe">
+                </div>
               </div>
-              <div class="clasif-safe-unsafe-legend">
-                <span class="clasif-legend-unsafe"><span class="clasif-legend-label">Unsafe</span> <b id="txtUnsafe">—</b></span>
-                <span class="clasif-legend-safe"><b id="txtSafe">—</b> <span class="clasif-legend-label">Safe</span></span>
+            </section>
+            <section class="clasif-upload-block" aria-label="Subir imágenes desde carpeta">
+              <div class="upload-zone">
+                <input type="file" class="upload-input-hidden" id="inpFolder" webkitdirectory directory multiple aria-label="Seleccionar carpeta con imágenes">
+                <label for="inpFolder" class="upload-trigger">
+                  <i class="fas fa-folder-open upload-zone-icon" aria-hidden="true"></i>
+                  <span class="upload-zone-label">Elegir carpeta</span>
+                  <span class="upload-zone-hint" id="uploadFolderName">Solo imágenes; estructura recursiva respetada. Videos y otros se descartan.</span>
+                </label>
               </div>
+              <div class="progress progress-soft" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar progress-bar-soft" id="barUpload" data-width="0"></div>
+              </div>
+              <div id="uploadProcesando" class="upload-procesando small" aria-live="polite" style="display: none;"></div>
             </section>
           </div>
         </div>
@@ -170,30 +186,11 @@ function pct($n, $d): int {
         </div>
       </div>
 
-      <!-- Columna derecha: Subir y Log -->
+      <!-- Columna derecha: Log -->
       <div class="col-lg-3 col-md-6 mb-3">
-        <div class="card card-dashboard card-no-grow">
-          <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-upload"></i> Subir imágenes (carpeta)</h3>
-          </div>
-          <div class="card-body upload-card-body">
-            <div class="upload-zone">
-              <input type="file" class="upload-input-hidden" id="inpFolder" webkitdirectory directory multiple>
-              <label for="inpFolder" class="upload-trigger">
-                <i class="fas fa-folder-open upload-zone-icon"></i>
-                <span class="upload-zone-label">Elegir carpeta</span>
-                <span class="upload-zone-hint" id="uploadFolderName">Solo imágenes; estructura recursiva respetada. Videos y otros se descartan.</span>
-              </label>
-            </div>
-            <div class="progress progress-soft mt-2">
-              <div class="progress-bar progress-bar-soft" role="progressbar" id="barUpload" data-width="0"></div>
-            </div>
-            <div id="uploadProcesando" class="upload-procesando mt-1 small text-muted" aria-live="polite" style="display: none;"></div>
-          </div>
-        </div>
         <div class="card card-dashboard card-log h-100">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <h3 class="card-title mb-0"><i class="fas fa-list-alt"></i> Log de procesamiento</h3>
+          <div class="card-header card-header-normalized d-flex justify-content-between align-items-center">
+            <h3 class="card-title mb-0"><i class="fas fa-list-alt" aria-hidden="true"></i> Log de procesamiento</h3>
             <button class="btn btn-outline-secondary btn-sm" type="button" id="btnLogClear" title="Limpiar"><i class="fas fa-trash-alt"></i> Limpiar</button>
           </div>
           <div class="card-body log-panel-body d-flex flex-column min-h-0">
@@ -208,8 +205,8 @@ function pct($n, $d): int {
       <div class="row">
         <div class="col-12">
           <div class="card" id="cardTablas">
-            <div class="card-header d-flex justify-content-between align-items-center py-2 cursor-pointer" data-toggle="collapse" data-target="#collapseTablas" aria-expanded="true" aria-controls="collapseTablas" id="cardTablasToggle">
-              <h3 class="card-title mb-0"><i class="fas fa-database"></i> Tablas</h3>
+            <div class="card-header card-header-normalized d-flex justify-content-between align-items-center py-2 cursor-pointer" data-toggle="collapse" data-target="#collapseTablas" aria-expanded="true" aria-controls="collapseTablas" id="cardTablasToggle">
+              <h3 class="card-title mb-0"><i class="fas fa-database" aria-hidden="true"></i> Tablas</h3>
               <i class="fas fa-chevron-down text-muted card-tablas-chevron" id="chevronTablas"></i>
             </div>
             <div id="collapseTablas" class="collapse show">
@@ -329,8 +326,6 @@ function pct($n, $d): int {
   const txtUnsafe = el('txtUnsafe');
   const txtSafe = el('txtSafe');
   const barProcesadas = el('barProcesadas');
-  const barUnsafe = el('barUnsafe');
-  const barSafe = el('barSafe');
 
   const stProcesar = el('stProcesar');
   const switchAuto = document.getElementById('switchAuto');
@@ -418,21 +413,18 @@ function pct($n, $d): int {
     if (totalDual > 0) {
       const unsafePct = Math.round((unsafe / totalDual) * 10000) / 100;
       const safePct = Math.round((safe / totalDual) * 10000) / 100;
-      if (txtUnsafe) txtUnsafe.textContent = unsafePct + '%';
-      if (txtSafe) txtSafe.textContent = safePct + '%';
-      if (barUnsafe) { barUnsafe.dataset.width = String(unsafePct); barUnsafe.style.width = unsafePct + '%'; }
-      if (barSafe) { barSafe.dataset.width = String(safePct); barSafe.style.width = safePct + '%'; }
+      if (txtUnsafe) txtUnsafe.value = unsafePct + '%';
+      if (txtSafe) txtSafe.value = safePct + '%';
     } else {
-      if (txtUnsafe) txtUnsafe.textContent = '—';
-      if (txtSafe) txtSafe.textContent = '—';
-      if (barUnsafe) { barUnsafe.dataset.width = '0'; barUnsafe.style.width = '0%'; }
-      if (barSafe) { barSafe.dataset.width = '0'; barSafe.style.width = '0%'; }
+      if (txtUnsafe) txtUnsafe.value = '—';
+      if (txtSafe) txtSafe.value = '—';
     }
 
     if (barProcesadas) {
       const w = pct(procesadas, total);
       barProcesadas.dataset.width = String(w);
       barProcesadas.style.width = w + '%';
+      barProcesadas.setAttribute('aria-valuenow', w);
     }
   }
 

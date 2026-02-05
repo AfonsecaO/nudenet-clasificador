@@ -254,9 +254,32 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 .clasif-card-body {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
-  padding: 1.5rem 1.25rem;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  min-height: 0;
+  overflow: hidden;
 }
+.clasif-card-body .clasif-progress-block,
+.clasif-card-body .clasif-safe-unsafe {
+  flex-shrink: 0;
+}
+/* Títulos de contenedores normalizados */
+.card-header-normalized .card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.card-header-normalized .card-title i {
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+.card-header-normalized {
+  border-bottom: 1px solid var(--border);
+}
+
 .clasif-progress-block {
   margin-bottom: 0;
 }
@@ -264,19 +287,24 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.35rem;
 }
 .clasif-progress-title {
-  font-size: 1rem;
-  font-weight: 500;
-  color: var(--text);
-  letter-spacing: 0.01em;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .clasif-progress-count {
-  font-size: 1rem;
+  font-size: 1.0625rem;
   font-weight: 600;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-page);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
 }
 .clasif-progress-sep {
   font-weight: 400;
@@ -284,7 +312,7 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   margin: 0 0.2rem;
 }
 .clasif-bar-track {
-  height: 12px;
+  height: 10px;
   background: var(--border);
   border-radius: 999px;
   overflow: hidden;
@@ -293,43 +321,50 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   height: 100%;
   width: 0%;
   border-radius: 999px;
-  background: var(--accent);
-  transition: width 0.4s ease;
+  background: linear-gradient(90deg, var(--accent) 0%, #3b82f6 100%);
+  transition: width 0.45s ease;
 }
 
-/* Safe / Unsafe: más aire, barra suave */
+/* Safe / Unsafe: inputs con identidad de color */
 .clasif-safe-unsafe {
   margin-bottom: 0;
-  padding: 1.25rem 0 0;
+  padding: 0.5rem 0 0;
   border-top: 1px solid var(--border);
 }
-.clasif-safe-unsafe-bar {
+.clasif-safe-unsafe-inputs {
   display: flex;
-  height: 12px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--border);
+  gap: 0.75rem;
+  align-items: stretch;
+  width: 100%;
 }
-.clasif-bar-unsafe, .clasif-bar-safe {
-  flex-shrink: 0;
-  height: 100%;
-  border-radius: 0;
-  transition: width 0.4s ease;
+.clasif-input-wrap {
+  flex: 1;
+  min-width: 0;
 }
-.clasif-bar-unsafe { background: var(--danger); }
-.clasif-bar-safe { background: var(--success); }
-.clasif-safe-unsafe-bar .clasif-bar-unsafe:first-child { border-radius: 999px 0 0 999px; }
-.clasif-safe-unsafe-bar .clasif-bar-safe:last-child { border-radius: 0 999px 999px 0; }
-.clasif-safe-unsafe-legend {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 0.75rem;
-  font-size: 0.9375rem;
-  color: var(--text-muted);
+.clasif-input-pct {
+  width: 100%;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.clasif-legend-unsafe .clasif-legend-label { color: var(--text); font-weight: 600; }
-.clasif-legend-safe .clasif-legend-label { color: var(--text); font-weight: 600; }
-.clasif-legend-unsafe b, .clasif-legend-safe b { color: var(--text); font-weight: 600; }
+.clasif-input-unsafe .clasif-input-pct {
+  background: var(--danger-bg);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  color: var(--danger);
+}
+.clasif-input-unsafe .clasif-input-pct::placeholder { color: var(--danger); opacity: 0.8; }
+.clasif-input-safe .clasif-input-pct {
+  background: var(--success-bg);
+  border: 1px solid rgba(5, 150, 105, 0.25);
+  color: var(--success);
+}
+.clasif-input-safe .clasif-input-pct::placeholder { color: var(--success); opacity: 0.8; }
+.clasif-input-wrap:focus-within .clasif-input-pct {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--border);
+}
 
 .clasif-actions {
   display: flex;
@@ -560,6 +595,38 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 }
 .custom-range { width: 100%; height: 1.5rem; accent-color: var(--accent); }
 
+/* Bloque de subida dentro del card de clasificación: ocupa todo el alto disponible */
+.clasif-upload-block {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.clasif-upload-block .upload-zone {
+  margin-bottom: 0.5rem;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+}
+.clasif-upload-block .upload-zone .upload-trigger {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.clasif-upload-block .progress-soft,
+.clasif-upload-block .upload-procesando {
+  flex-shrink: 0;
+}
+.clasif-upload-block .upload-procesando {
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  min-height: 1.25rem;
+}
+
 /* Subir imágenes: zona y botón con estilos suaves */
 .upload-card-body .upload-zone { margin-bottom: 1rem; }
 .upload-input-hidden {
@@ -575,34 +642,41 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 72px;
-  padding: 0.65rem 1rem;
+  min-height: 76px;
+  padding: 0.75rem 1rem;
   background: var(--soft-3-bg);
   border: 2px dashed var(--soft-3);
   border-radius: var(--radius);
   color: var(--soft-1);
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
 }
 .upload-trigger:hover {
   background: var(--soft-1-bg);
   border-color: var(--soft-1);
   color: var(--soft-active);
 }
+.upload-trigger:active { transform: scale(0.99); }
+.upload-input-hidden:focus-visible + .upload-trigger,
+.upload-trigger:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
 .upload-zone-icon {
-  font-size: 1.35rem;
-  margin-bottom: 0.25rem;
+  font-size: 1.5rem;
+  margin-bottom: 0.35rem;
   opacity: 0.9;
 }
 .upload-zone-label {
   font-size: 0.875rem;
   font-weight: 600;
-  margin-bottom: 0.15rem;
+  margin-bottom: 0.2rem;
 }
 .upload-zone-hint {
   font-size: 0.75rem;
   font-weight: 400;
   color: var(--soft-chip);
+  line-height: 1.35;
 }
 .btn-upload-soft {
   width: 100%;
@@ -624,7 +698,8 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 .btn-upload-soft:active:not(:disabled) { transform: scale(0.98); }
 .btn-upload-soft:disabled { opacity: 0.7; cursor: not-allowed; }
 .progress-soft { height: 6px; background: var(--soft-3-bg); border-radius: 999px; overflow: hidden; }
-.progress-bar-soft { background: linear-gradient(90deg, var(--soft-2) 0%, var(--soft-active) 100%); transition: width 0.3s ease; }
+.progress-bar-soft { background: linear-gradient(90deg, var(--soft-2) 0%, var(--soft-active) 100%); transition: width 0.35s ease; }
+.clasif-upload-block .progress-soft { margin-top: 0.5rem; }
 
 /* Custom control (switch) */
 .custom-control.custom-switch { display: flex; align-items: center; gap: 0.5rem; }
