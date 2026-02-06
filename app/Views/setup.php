@@ -156,13 +156,22 @@ $__patronDisplay = preg_replace('/\.ext\s*$/i', '', trim((string)($values['PATRO
                 <span class="badge badge-secondary" id="stSchemaChip">Pendiente</span>
               </div>
               <div class="card-body">
-                <div class="form-row">
-                  <div class="form-group col-md-9">
+                <div class="form-row align-items-end">
+                  <div class="form-group col-md-9 mb-0">
                     <label for="TABLE_PATTERN">TABLE_PATTERN</label>
-                    <input class="form-control" id="TABLE_PATTERN" value="<?php echo v('TABLE_PATTERN',$values); ?>">
+                    <input class="form-control" id="TABLE_PATTERN" value="<?php echo v('TABLE_PATTERN',$values); ?>" placeholder="ej: ia_miner, ia_miner?, ia_miner*">
                   </div>
-                  <div class="form-group col-md-3 d-flex align-items-end">
+                  <div class="form-group col-md-3 mb-0">
                     <button class="btn btn-info btn-block" type="button" id="btnTestSchema"><i class="fas fa-search"></i> Buscar</button>
+                  </div>
+                </div>
+                <div class="form-row mt-2 mb-3">
+                  <div class="col-12">
+                    <div class="table-pattern-hint">
+                      <div class="table-pattern-hint-line"><strong>Sin comodines</strong> → una sola tabla exacta (ej: <code>ia_miner</code>).</div>
+                      <div class="table-pattern-hint-line"><strong><kbd>?</kbd></strong> → un carácter (ej: <code>ia_miner?</code> = ia_miner_1, ia_minera).</div>
+                      <div class="table-pattern-hint-line"><strong><kbd>*</kbd></strong> → cero o más caracteres (ej: <code>ia_miner*</code> = ia_miner, ia_miner_xxx; <code>*miner*</code> = cualquier nombre que contenga "miner").</div>
+                    </div>
                   </div>
                 </div>
 

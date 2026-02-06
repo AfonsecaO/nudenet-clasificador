@@ -359,7 +359,13 @@ class MaterializadorImagenes
             
             // Construir ruta completa desde el directorio base
             $rutaCompleta = $this->directorioBase . '/' . $rutaCompleta;
-            
+            // Normalizar cada segmento de la ruta (nombres sin caracteres extraños)
+            $relativa = str_replace($this->directorioBase . '/', '', $rutaCompleta);
+            $relativa = StringNormalizer::normalizeRelativePath($relativa);
+            if ($relativa !== '') {
+                $rutaCompleta = $this->directorioBase . '/' . $relativa;
+            }
+
             // Separar directorio y nombre de archivo
             $directorioDestino = dirname($rutaCompleta);
             $nombreArchivo = basename($rutaCompleta);
@@ -381,8 +387,15 @@ class MaterializadorImagenes
             $nombreArchivoFinal = $this->generarNombreUnico($directorioDestino, $nombreArchivoSinExt, $extensionArchivo);
             $rutaCompleta = $directorioDestino . '/' . $nombreArchivoFinal;
 
-            // Calcular MD5 (dedupe) con los datos ya extraídos/convertidos
-            $md5 = md5($datosBinarios);
+            // Comprimir imagen (jpg/png) para reducir peso manteniendo extensión
+            $toSave = $datosBinarios;
+            $compressed = ImageCompressor::compress($datosBinarios, $extensionArchivo);
+            if ($compressed !== null) {
+                $toSave = $compressed;
+            }
+
+            // Calcular MD5 (dedupe) con los datos a guardar
+            $md5 = md5($toSave);
             if ($this->yaExisteMd5($md5)) {
                 return [
                     'success' => true,
@@ -394,7 +407,7 @@ class MaterializadorImagenes
             $this->seenMd5[$md5] = true;
 
             // Guardar datos
-            $escrito = @file_put_contents($rutaCompleta, $datosBinarios);
+            $escrito = @file_put_contents($rutaCompleta, $toSave);
             
             if ($escrito === false) {
                 return [

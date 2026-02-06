@@ -384,19 +384,32 @@ class SetupController extends BaseController
         }
     }
 
+    /**
+     * Busca tablas por patrón. Comodines: ? = un carácter, * = cero o más.
+     * Sin comodines = coincidencia exacta.
+     */
     private function buscarTablasPorPatron(PDO $pdo, string $dbName, string $pattern): array
     {
-        $escapedPattern = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $pattern);
-        $likePattern = str_replace('?', '_', $escapedPattern);
-        $likePattern = '%' . $likePattern . '%';
+        $pattern = trim($pattern);
+        $hasWildcards = (strpos($pattern, '?') !== false || strpos($pattern, '*') !== false);
 
-        $sql = "SELECT TABLE_NAME
-                FROM INFORMATION_SCHEMA.TABLES
-                WHERE TABLE_SCHEMA = :db
-                  AND TABLE_NAME LIKE :pattern
-                ORDER BY TABLE_NAME ASC";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([':db' => $dbName, ':pattern' => $likePattern]);
+        if (!$hasWildcards) {
+            $sql = "SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :pattern
+                    ORDER BY TABLE_NAME ASC";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([':db' => $dbName, ':pattern' => $pattern]);
+        } else {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $pattern);
+            $likePattern = str_replace(['*', '?'], ['%', '_'], $escaped);
+            $sql = "SELECT TABLE_NAME
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_SCHEMA = :db AND TABLE_NAME LIKE :pattern
+                    ORDER BY TABLE_NAME ASC";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([':db' => $dbName, ':pattern' => $likePattern]);
+        }
         return array_map(fn($r) => $r['TABLE_NAME'], $stmt->fetchAll() ?: []);
     }
 

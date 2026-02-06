@@ -29,23 +29,33 @@ function fmtTs($ts): string {
 </nav>
 
 <main class="main content page-workspaces">
-  <div class="container">
-    <header class="workspaces-header">
-      <h1 class="workspaces-title"><i class="fas fa-layer-group"></i> Workspaces</h1>
-      <p class="workspaces-subtitle">Gestiona y cambia entre ambientes aislados.</p>
+  <div class="container ws-container">
+    <header class="ws-header">
+      <h1 class="ws-header-title">Workspaces</h1>
+      <p class="ws-header-desc">Ambientes aislados. Descargar o Clasificar para procesar varios a la vez aquí.</p>
     </header>
 
+    <?php if (!empty($workspaces)): ?>
+    <div id="workspaceProcessingPanel" class="ws-processing" style="display: none;">
+      <div class="ws-processing-head">
+        <span class="ws-processing-label"><i class="fas fa-sync-alt fa-spin" aria-hidden="true"></i> Procesando</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnStopAll" title="Detener todos">Detener todos</button>
+      </div>
+      <div id="workspaceProcessingList" class="ws-processing-list"></div>
+    </div>
+    <?php endif; ?>
+
     <?php if (empty($workspaces)): ?>
-      <div class="workspaces-empty">
-        <div class="workspaces-empty-icon"><i class="fas fa-folder-open"></i></div>
-        <h2 class="workspaces-empty-title">Sin workspaces</h2>
-        <p class="workspaces-empty-text">Crea el primero para empezar a clasificar imágenes.</p>
+      <div class="ws-empty">
+        <div class="ws-empty-icon" aria-hidden="true"><i class="fas fa-folder-open"></i></div>
+        <h2 class="ws-empty-title">Sin workspaces</h2>
+        <p class="ws-empty-desc">Crea el primero para empezar a clasificar imágenes.</p>
         <button class="btn btn-primary" type="button" data-toggle="modal" data-target="#createModal">
           <i class="fas fa-plus"></i> Crear workspace
         </button>
       </div>
     <?php else: ?>
-    <div class="row workspace-cards-row">
+    <div class="ws-grid">
       <?php foreach ($workspaces as $ws): ?>
         <?php
           $slug = (string)($ws['slug'] ?? '');
@@ -58,52 +68,55 @@ function fmtTs($ts): string {
           $createdAt = fmtTs($ws['created_at'] ?? null);
           $updatedAt = (string)($ws['updated_at'] ?? '');
           $modeLabel = ($mode === 'db_and_images') ? 'DB + imágenes' : (($mode === 'images_only') ? 'Solo imágenes' : 'Sin configurar');
-          $statusLabel = $configured ? 'Configurado' : 'Pendiente';
         ?>
-        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-4">
-          <div class="card workspace-card<?php echo $isCurrent ? ' workspace-card--current' : ''; ?>">
-            <div class="card-header workspace-card-header d-flex align-items-center justify-content-between">
-              <div class="d-flex align-items-center min-w-0">
-                <span class="workspace-card-icon <?php echo $configured ? 'text-success' : 'text-muted'; ?>">
+        <article class="ws-card<?php echo $isCurrent ? ' ws-card--current' : ''; ?> <?php echo $configured ? 'ws-card--ok' : 'ws-card--pending'; ?>" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
+          <div class="ws-card-inner">
+            <div class="ws-card-top">
+              <div class="ws-card-name-wrap">
+                <span class="ws-card-status" title="<?php echo $configured ? 'Configurado' : 'Pendiente'; ?>">
                   <i class="fas <?php echo $configured ? 'fa-check-circle' : 'fa-clock'; ?>"></i>
                 </span>
-                <h3 class="workspace-card-title mb-0"><?php echo htmlspecialchars($slug, ENT_QUOTES); ?></h3>
+                <h2 class="ws-card-name"><?php echo htmlspecialchars($slug, ENT_QUOTES); ?></h2>
                 <?php if ($isCurrent): ?>
-                  <span class="badge badge-info ml-2 flex-shrink-0">Actual</span>
+                  <span class="ws-card-badge-current">Actual</span>
                 <?php endif; ?>
               </div>
-              <button class="btn btn-link btn-sm text-danger p-1 ml-2 btnDeleteWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Eliminar workspace">
+              <button class="ws-card-delete btn btn-link btn-sm btnDeleteWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Eliminar workspace" aria-label="Eliminar <?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
                 <i class="fas fa-trash-alt"></i>
               </button>
             </div>
-            <div class="card-body">
-              <div class="workspace-card-path text-monospace text-muted small">workspaces/<?php echo htmlspecialchars($slug, ENT_QUOTES); ?></div>
-              <div class="workspace-card-badges mt-2">
-                <span class="badge badge-<?php echo $configured ? 'success' : 'warning'; ?>"><?php echo htmlspecialchars($statusLabel, ENT_QUOTES); ?></span>
-                <span class="badge badge-secondary"><?php echo htmlspecialchars($modeLabel, ENT_QUOTES); ?></span>
-              </div>
-              <div class="workspace-card-stats mt-3">
-                <?php if ($imgTotal !== null || $imgPend !== null || $detTotal !== null): ?>
-                  <div class="workspace-stat"><span class="workspace-stat-value"><?php echo $imgTotal !== null ? number_format($imgTotal) : '—'; ?></span><span class="workspace-stat-label">Imágenes</span></div>
-                  <div class="workspace-stat"><span class="workspace-stat-value"><?php echo $imgPend !== null ? number_format($imgPend) : '—'; ?></span><span class="workspace-stat-label">Pendientes</span></div>
-                  <div class="workspace-stat"><span class="workspace-stat-value"><?php echo $detTotal !== null ? number_format($detTotal) : '—'; ?></span><span class="workspace-stat-label">Detecciones</span></div>
-                <?php endif; ?>
-              </div>
-              <div class="workspace-card-meta text-muted small mt-3">
-                Creado <?php echo htmlspecialchars($createdAt, ENT_QUOTES); ?>
-                <?php if ($updatedAt): ?> · Actualizado <?php echo htmlspecialchars($updatedAt, ENT_QUOTES); ?><?php endif; ?>
-              </div>
+            <p class="ws-card-path">workspaces/<?php echo htmlspecialchars($slug, ENT_QUOTES); ?> <span class="ws-card-created">· Creado <?php echo htmlspecialchars($createdAt, ENT_QUOTES); ?></span></p>
+            <div class="ws-card-badges">
+              <span class="ws-badge ws-badge--<?php echo $configured ? 'ok' : 'warn'; ?>"><?php echo $configured ? 'Configurado' : 'Pendiente'; ?></span>
+              <span class="ws-badge ws-badge--mode"><?php echo htmlspecialchars($modeLabel, ENT_QUOTES); ?></span>
             </div>
-            <div class="card-footer workspace-card-footer bg-transparent border-top d-flex flex-wrap">
-              <button class="btn btn-primary btn-sm btnEnterWs mr-2" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
+            <?php if ($imgTotal !== null || $imgPend !== null || $detTotal !== null): ?>
+            <div class="ws-card-stats" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
+              <div class="ws-stat"><span class="ws-stat-num" data-stat="images"><?php echo $imgTotal !== null ? number_format($imgTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-image"></i> Imágenes</span></div>
+              <div class="ws-stat"><span class="ws-stat-num" data-stat="pending"><?php echo $imgPend !== null ? number_format($imgPend) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-hourglass-half"></i> Pendientes</span></div>
+              <div class="ws-stat"><span class="ws-stat-num" data-stat="detections"><?php echo $detTotal !== null ? number_format($detTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-robot"></i> Detecciones</span></div>
+            </div>
+            <?php endif; ?>
+            <div class="ws-card-actions">
+              <button class="btn btn-primary btn-sm btnEnterWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
                 <i class="fas fa-arrow-right"></i> Entrar
               </button>
-              <button class="btn btn-outline-secondary btn-sm btnSetupWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
+              <button class="btn btn-outline-secondary btn-sm btnSetupWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Parametrización">
                 <i class="fas fa-cog"></i> Parametrización
               </button>
+              <?php if ($configured): ?>
+                <?php if ($mode === 'db_and_images'): ?>
+                <button type="button" class="btn btn-outline-info btn-sm btn-worker btnWsDescargar" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Descargar tablas aquí">
+                  <i class="fas fa-download"></i> Descargar
+                </button>
+                <?php endif; ?>
+                <button type="button" class="btn btn-outline-success btn-sm btn-worker btnWsClasificar" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Clasificar aquí">
+                  <i class="fas fa-robot"></i> Clasificar
+                </button>
+              <?php endif; ?>
             </div>
           </div>
-        </div>
+        </article>
       <?php endforeach; ?>
     </div>
     <?php endif; ?>
@@ -197,6 +210,250 @@ function fmtTs($ts): string {
     });
     const data = await resp.json().catch(() => ({}));
     return { ok: resp.ok, data };
+  }
+
+  function apiUrl(action, params) {
+    let url = `?action=${encodeURIComponent(action)}`;
+    if (params && typeof params === 'object') {
+      Object.keys(params).forEach((k) => {
+        url += `&${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`;
+      });
+    }
+    return url;
+  }
+
+  async function getJson(url) {
+    const resp = await fetch(url, { headers: { 'accept': 'application/json' } });
+    const data = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, data };
+  }
+
+  // --- Procesamiento en la misma pantalla con Web Worker (ejecución paralela) ---
+  const downloadQueue = new Set();
+  const classifyQueue = new Set();
+  const panelEl = document.getElementById('workspaceProcessingPanel');
+  const listEl = document.getElementById('workspaceProcessingList');
+  const btnStopAll = document.getElementById('btnStopAll');
+
+  let worker = null;
+  try {
+    const workerUrl = (typeof window !== 'undefined' && window.location?.pathname)
+      ? window.location.pathname.replace(/\/[^/]*$/, '/') + 'js/workspace-processor.worker.js'
+      : 'js/workspace-processor.worker.js';
+    worker = new Worker(workerUrl);
+    worker.postMessage({ type: 'init', baseUrl: window.location.origin + window.location.pathname });
+  } catch (e) {
+    console.warn('Web Worker no disponible:', e);
+  }
+
+  let mainThreadStopRequested = false;
+  async function runDownloadLoopMain(ws) {
+    while (downloadQueue.has(ws) && !mainThreadStopRequested) {
+      const url = apiUrlWs('procesar', ws);
+      const { ok, data } = await getJson(url);
+      if (!ok || !data?.success || !downloadQueue.has(ws)) break;
+      const msg = String(data?.mensaje || '');
+      if (msg.includes('completada') || msg.includes('No se encontraron tablas')) {
+        downloadQueue.delete(ws);
+        updateProcessingPanel();
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  async function runClassifyLoopMain(ws) {
+    while (classifyQueue.has(ws) && !mainThreadStopRequested) {
+      const url = apiUrlWs('procesar_imagenes', ws);
+      const { ok, data } = await getJson(url);
+      if (!ok || !data?.success || !classifyQueue.has(ws)) break;
+      const pending = data?.pendientes ?? data?.pending ?? 0;
+      const total = data?.total ?? 0;
+      const procesadas = data?.procesadas ?? 0;
+      if (pending === 0 || (total > 0 && procesadas >= total)) {
+        classifyQueue.delete(ws);
+        updateProcessingPanel();
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  function apiUrlWs(action, workspace) {
+    return apiUrl(action, { workspace });
+  }
+
+  function syncQueuesFromState(state) {
+    if (!state) return;
+    if (Array.isArray(state.download)) { downloadQueue.clear(); state.download.forEach((ws) => downloadQueue.add(ws)); }
+    if (Array.isArray(state.classify)) { classifyQueue.clear(); state.classify.forEach((ws) => classifyQueue.add(ws)); }
+  }
+
+  function updateProcessingPanel() {
+    if (!listEl) return;
+    const items = [];
+    downloadQueue.forEach((ws) => items.push({ ws, type: 'descargar', label: 'Descargar tablas' }));
+    classifyQueue.forEach((ws) => items.push({ ws, type: 'clasificar', label: 'Clasificar' }));
+    if (items.length === 0) {
+      if (panelEl) panelEl.style.display = 'none';
+      return;
+    }
+    if (panelEl) panelEl.style.display = 'block';
+    listEl.innerHTML = items.map((it) =>
+      `<div class="ws-processing-item" data-ws="${it.ws}" data-type="${it.type}">
+        <span class="ws-processing-ws">${it.ws}</span>
+        <span class="ws-processing-type">${it.label}</span>
+        <div class="ws-processing-metrics" data-ws="${it.ws}" data-type="${it.type}">—</div>
+        <button type="button" class="btn btn-outline-danger btn-sm btnStopOne" data-ws="${it.ws}" data-type="${it.type}" title="Quitar de la cola">Quitar</button>
+      </div>`
+    ).join('');
+    listEl.querySelectorAll('.btnStopOne').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const ws = btn.getAttribute('data-ws');
+        const type = btn.getAttribute('data-type');
+        if (type === 'descargar') { downloadQueue.delete(ws); if (worker) worker.postMessage({ type: 'remove', mode: 'download', ws }); }
+        else { classifyQueue.delete(ws); if (worker) worker.postMessage({ type: 'remove', mode: 'classify', ws }); }
+        updateProcessingPanel();
+      });
+    });
+  }
+
+  async function fetchStatsDescarga(ws) {
+    const { ok, data } = await getJson(apiUrlWs('estadisticas_descarga', ws));
+    if (!ok || !data?.success || !data?.stats) return null;
+    const s = data.stats;
+    return {
+      type: 'descargar',
+      registros_procesados: Number(s.registros_procesados ?? 0),
+      total_registros: Number(s.total_registros ?? 0),
+      pendientes: Number(s.pendientes ?? 0),
+      tablas_completadas: Number(s.tablas_completadas ?? 0),
+      tablas_total: Number(s.tablas_total ?? 0)
+    };
+  }
+
+  async function fetchStatsClasificacion(ws) {
+    const { ok, data } = await getJson(apiUrlWs('estadisticas_clasificacion', ws));
+    if (!ok || !data?.success || !data?.stats) return null;
+    const s = data.stats;
+    return {
+      type: 'clasificar',
+      total: Number(s.total ?? 0),
+      procesadas: Number(s.procesadas ?? 0),
+      pendientes: Number(s.pendientes ?? 0),
+      pendientes_deteccion: Number(s.pendientes_deteccion ?? 0),
+      detections_total: Number(s.detections_total ?? 0),
+      safe: Number(s.safe ?? 0),
+      unsafe: Number(s.unsafe ?? 0)
+    };
+  }
+
+  function updateCardStats(ws, statsClasificacion) {
+    if (!statsClasificacion) return;
+    const container = document.querySelector(`.ws-card-stats[data-ws="${ws}"]`);
+    if (!container) return;
+    const imgEl = container.querySelector('.ws-stat-num[data-stat="images"]');
+    const pendEl = container.querySelector('.ws-stat-num[data-stat="pending"]');
+    const detEl = container.querySelector('.ws-stat-num[data-stat="detections"]');
+    if (imgEl) imgEl.textContent = (statsClasificacion.total ?? 0).toLocaleString();
+    if (pendEl) pendEl.textContent = (statsClasificacion.pendientes_deteccion ?? statsClasificacion.pendientes ?? 0).toLocaleString();
+    if (detEl) detEl.textContent = (statsClasificacion.detections_total ?? 0).toLocaleString();
+  }
+
+  function formatMetrics(type, stats) {
+    if (!stats) return '—';
+    if (type === 'descargar') {
+      const r = stats.registros_procesados ?? 0;
+      const t = stats.total_registros ?? 0;
+      const p = stats.pendientes ?? 0;
+      const tablas = (stats.tablas_completadas != null && stats.tablas_total != null)
+        ? ` · Tablas ${stats.tablas_completadas}/${stats.tablas_total}`
+        : '';
+      return `Registros descargados: ${r.toLocaleString()} · Faltan: ${p.toLocaleString()}${tablas}`;
+    }
+    const total = stats.total ?? 0;
+    const procesadas = stats.procesadas ?? 0;
+    const pendientes = stats.pendientes ?? 0;
+    return `Imágenes: ${total.toLocaleString()} · Procesadas: ${procesadas.toLocaleString()} · Pendientes clasificar: ${pendientes.toLocaleString()}`;
+  }
+
+  async function refreshPanelStats() {
+    const items = [];
+    downloadQueue.forEach((ws) => items.push({ ws, type: 'descargar' }));
+    classifyQueue.forEach((ws) => items.push({ ws, type: 'clasificar' }));
+    for (const { ws, type } of items) {
+      let stats;
+      if (type === 'descargar') {
+        stats = await fetchStatsDescarga(ws);
+        const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
+        if (el) el.textContent = formatMetrics(type, stats);
+        const statsCard = await fetchStatsClasificacion(ws);
+        updateCardStats(ws, statsCard);
+      } else {
+        stats = await fetchStatsClasificacion(ws);
+        const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
+        if (el) el.textContent = formatMetrics(type, stats);
+        updateCardStats(ws, stats);
+      }
+    }
+  }
+
+  let statsIntervalId = null;
+  function startStatsPolling() {
+    if (statsIntervalId) return;
+    statsIntervalId = setInterval(refreshPanelStats, 4000);
+  }
+  function stopStatsPolling() {
+    if (statsIntervalId) { clearInterval(statsIntervalId); statsIntervalId = null; }
+  }
+
+  if (worker) {
+    worker.onmessage = function (e) {
+      const msg = e.data;
+      if (msg?.type === 'state') {
+        syncQueuesFromState(msg);
+        updateProcessingPanel();
+        if (downloadQueue.size === 0 && classifyQueue.size === 0) stopStatsPolling();
+      } else if (msg?.type === 'done') {
+        if (msg.mode === 'download') downloadQueue.delete(msg.ws);
+        else classifyQueue.delete(msg.ws);
+        updateProcessingPanel();
+        if (downloadQueue.size === 0 && classifyQueue.size === 0) stopStatsPolling();
+      }
+    };
+  }
+
+  document.querySelectorAll('.btnWsDescargar[data-ws]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const ws = btn.getAttribute('data-ws');
+      if (!ws) return;
+      downloadQueue.add(ws);
+      updateProcessingPanel();
+      startStatsPolling();
+      if (worker) worker.postMessage({ type: 'add', mode: 'download', ws });
+      else { mainThreadStopRequested = false; runDownloadLoopMain(ws); }
+    });
+  });
+  document.querySelectorAll('.btnWsClasificar[data-ws]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const ws = btn.getAttribute('data-ws');
+      if (!ws) return;
+      classifyQueue.add(ws);
+      updateProcessingPanel();
+      startStatsPolling();
+      if (worker) worker.postMessage({ type: 'add', mode: 'classify', ws });
+      else { mainThreadStopRequested = false; runClassifyLoopMain(ws); }
+    });
+  });
+
+  if (btnStopAll) {
+    btnStopAll.addEventListener('click', () => {
+      downloadQueue.clear();
+      classifyQueue.clear();
+      if (worker) worker.postMessage({ type: 'stopAll' });
+      else mainThreadStopRequested = true;
+      stopStatsPolling();
+      updateProcessingPanel();
+    });
   }
 
   async function abrirWorkspace(slug) {

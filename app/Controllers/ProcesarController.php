@@ -84,7 +84,7 @@ class ProcesarController extends BaseController
             $duplicadasCols = [];
             $mensaje = '';
             $registroId = null;
-            
+
             // Buscar la primera tabla con registros pendientes (solo usando el estado, sin consultar BD)
             foreach ($tablasDelEstado as $tabla) {
                 // Verificar si faltan registros (solo usando el estado)
@@ -168,10 +168,11 @@ class ProcesarController extends BaseController
                     }
                 }
                 
+                $valorId = ($registroId !== null) ? (string) $registroId : '';
                 if ($resultadoRegistro['faltan_registros']) {
-                    $mensaje = "Registro procesado de {$tabla}. Aún faltan registros.";
+                    $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Aún faltan registros." : "Registro procesado de {$tabla}. Aún faltan registros.";
                 } else {
-                    $mensaje = "Registro procesado de {$tabla}. Tabla completada.";
+                    $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Tabla completada." : "Registro procesado de {$tabla}. Tabla completada.";
                 }
                 
                 if (!empty($erroresImagenes)) {
@@ -212,6 +213,65 @@ class ProcesarController extends BaseController
             // Limpiar cualquier output inesperado antes de enviar JSON
             ob_clean();
             
+            $this->jsonResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Estadísticas de descarga de tablas (registros descargados / pendientes) para el panel Procesando.
+     */
+    public function estadisticasDescarga()
+    {
+        try {
+            if (\App\Services\ConfigService::getWorkspaceMode() !== 'db_and_images') {
+                $this->jsonResponse([
+                    'success' => true,
+                    'stats' => [
+                        'total_registros' => 0,
+                        'registros_procesados' => 0,
+                        'pendientes' => 0,
+                        'tablas_total' => 0,
+                        'tablas_completadas' => 0,
+                    ],
+                    'estado' => []
+                ]);
+                return;
+            }
+
+            $estadoTracker = new EstadoTracker();
+            $estado = $estadoTracker->getEstado();
+
+            $totalRegistros = 0;
+            $registrosProcesados = 0;
+            $tablasCompletadas = 0;
+
+            foreach ($estado as $tabla => $info) {
+                $maxId = (int)($info['max_id'] ?? 0);
+                $ultimoId = (int)($info['ultimo_id'] ?? 0);
+                $totalRegistros += $maxId;
+                $registrosProcesados += $ultimoId;
+                if (empty($info['faltan_registros'])) {
+                    $tablasCompletadas++;
+                }
+            }
+
+            $pendientes = max(0, $totalRegistros - $registrosProcesados);
+
+            $this->jsonResponse([
+                'success' => true,
+                'stats' => [
+                    'total_registros' => $totalRegistros,
+                    'registros_procesados' => $registrosProcesados,
+                    'pendientes' => $pendientes,
+                    'tablas_total' => count($estado),
+                    'tablas_completadas' => $tablasCompletadas,
+                ],
+                'estado' => $estado
+            ]);
+        } catch (\Exception $e) {
             $this->jsonResponse([
                 'success' => false,
                 'error' => $e->getMessage()

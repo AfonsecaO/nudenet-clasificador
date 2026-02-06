@@ -4,8 +4,12 @@
 /** @var int $totalTablasEstado */
 /** @var array $tablasDelEstado */
 /** @var array $estadoProcesamiento */
+/** @var string|null $app_workspace_slug */
+/** @var string|null $auto_param */
 
 $__title = 'Clasificador';
+$app_workspace_slug = $app_workspace_slug ?? null;
+$auto_param = $auto_param ?? null;
 $__bodyClass = '';
 
 $mode = isset($mode) ? (string)$mode : 'images_only';
@@ -319,6 +323,60 @@ function pct($n, $d): int {
 </div>
 
 <script>
+  <?php if ($app_workspace_slug !== null && $app_workspace_slug !== ''): ?>window.APP_WORKSPACE = <?php echo json_encode($app_workspace_slug); ?>;<?php endif; ?>
+  <?php if ($auto_param !== null && $auto_param !== ''): ?>window.APP_AUTO = <?php echo json_encode($auto_param); ?>;<?php endif; ?>
+
+  function appendWorkspace(url) {
+    if (typeof window.APP_WORKSPACE !== 'string' || !window.APP_WORKSPACE) return url;
+    const sep = url.indexOf('?') >= 0 ? '&' : '?';
+    return url + sep + 'workspace=' + encodeURIComponent(window.APP_WORKSPACE);
+  }
+
+  let indexWorker = null;
+  try {
+    const workerUrl = (typeof window !== 'undefined' && window.location?.pathname)
+      ? window.location.pathname.replace(/\/[^/]*$/, '/') + 'js/workspace-processor.worker.js'
+      : 'js/workspace-processor.worker.js';
+    indexWorker = new Worker(workerUrl);
+    indexWorker.postMessage({ type: 'init', baseUrl: window.location.origin + window.location.pathname });
+  } catch (e) {
+    console.warn('Web Worker no disponible en index:', e);
+  }
+
+  if (indexWorker && typeof window.APP_WORKSPACE === 'string' && window.APP_WORKSPACE) {
+    indexWorker.onmessage = function (e) {
+      const msg = e.data;
+      if (msg?.type !== 'done' || msg.ws !== window.APP_WORKSPACE) return;
+      if (msg.mode === 'classify') {
+        autoRunning = false;
+        if (switchAuto) switchAuto.checked = false;
+        stopIndexAutoStatsPolling();
+        setStatus(stProcesar, 'neutral', 'Auto detenido');
+        appendLog('info', 'Auto clasificación detenido.');
+        refreshStats().then(() => loadEtiquetas()).then(() => refreshLogPanel());
+      } else if (msg.mode === 'download') {
+        autoTablasRunning = false;
+        if (switchAutoTablas) switchAutoTablas.checked = false;
+        stopIndexAutoStatsPolling();
+        setStatus(stTablas, 'neutral', 'Auto detenido');
+        appendLog('info', 'Auto tablas detenido.');
+        refreshStats().then(() => loadEtiquetas()).then(() => refreshLogPanel());
+      }
+    };
+  }
+
+  let indexAutoStatsIntervalId = null;
+  function startIndexAutoStatsPolling() {
+    if (indexAutoStatsIntervalId) return;
+    indexAutoStatsIntervalId = setInterval(() => {
+      refreshStats();
+      refreshLogPanel();
+    }, 2500);
+  }
+  function stopIndexAutoStatsPolling() {
+    if (indexAutoStatsIntervalId) { clearInterval(indexAutoStatsIntervalId); indexAutoStatsIntervalId = null; }
+  }
+
   const el = (id) => document.getElementById(id);
 
   const txtProcesadas = el('txtProcesadas');
@@ -386,6 +444,7 @@ function pct($n, $d): int {
   }
 
   async function getJson(url) {
+    url = appendWorkspace(url);
     const resp = await fetch(url, { headers: { 'accept': 'application/json' } });
     const data = await resp.json().catch(() => ({}));
     return { ok: resp.ok, data };
@@ -647,6 +706,8 @@ function pct($n, $d): int {
     if (switchAuto) switchAuto.checked = !!on;
     if (!on) {
       autoRunning = false;
+      if (indexWorker && window.APP_WORKSPACE) indexWorker.postMessage({ type: 'remove', mode: 'classify', ws: window.APP_WORKSPACE });
+      stopIndexAutoStatsPolling();
       setStatus(stProcesar, 'neutral', 'Auto detenido');
       await appendLog('info', 'Auto clasificación detenido.');
       await refreshLogPanel();
@@ -657,7 +718,12 @@ function pct($n, $d): int {
     setStatus(stProcesar, 'neutral', 'Auto en ejecución…');
     await appendLog('info', 'Auto clasificación iniciado.');
     await refreshLogPanel();
-    autoLoopImagenes();
+    if (indexWorker && window.APP_WORKSPACE) {
+      startIndexAutoStatsPolling();
+      indexWorker.postMessage({ type: 'add', mode: 'classify', ws: window.APP_WORKSPACE });
+    } else {
+      autoLoopImagenes();
+    }
   }
 
   async function resetAll() {
@@ -1124,7 +1190,7 @@ function pct($n, $d): int {
       const img = document.createElement('img');
       img.alt = nombre;
       img.loading = 'lazy';
-      img.src = `?action=ver_imagen&ruta=${encodeURIComponent(lastFolder?.ruta || '')}&archivo=${encodeURIComponent(nombre)}&thumb=1&w=240`;
+      img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(lastFolder?.ruta || '')}&archivo=${encodeURIComponent(nombre)}&thumb=1&w=240`);
       imgWrap.appendChild(img);
       a.appendChild(imgWrap);
       const body = document.createElement('div');
@@ -1186,7 +1252,7 @@ function pct($n, $d): int {
       const img = document.createElement('img');
       img.alt = archivo;
       img.loading = 'lazy';
-      img.src = `?action=ver_imagen&ruta=${encodeURIComponent(rutaCarpeta)}&archivo=${encodeURIComponent(archivo)}&thumb=1&w=240`;
+      img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(rutaCarpeta)}&archivo=${encodeURIComponent(archivo)}&thumb=1&w=240`);
       imgWrap.appendChild(img);
       a.appendChild(imgWrap);
       const body = document.createElement('div');
@@ -1354,7 +1420,7 @@ function pct($n, $d): int {
     visor.img = null;
     if (ttlImagen) ttlImagen.textContent = visor.archivo || 'Imagen';
     if (stVisor) stVisor.textContent = 'Cargando…';
-    if (lnkAbrirOriginal) lnkAbrirOriginal.href = `?action=ver_imagen&ruta=${encodeURIComponent(visor.ruta)}&archivo=${encodeURIComponent(visor.archivo)}`;
+    if (lnkAbrirOriginal) lnkAbrirOriginal.href = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(visor.ruta)}&archivo=${encodeURIComponent(visor.archivo)}`);
 
     renderDetBadges([], true);
     if (window.jQuery) window.jQuery('#modalVisor').modal('show');
@@ -1374,7 +1440,7 @@ function pct($n, $d): int {
     img.onerror = () => {
       setStatus(stVisor, 'bad', 'No se pudo cargar la imagen');
     };
-    img.src = `?action=ver_imagen&ruta=${encodeURIComponent(visor.ruta)}&archivo=${encodeURIComponent(visor.archivo)}`;
+    img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(visor.ruta)}&archivo=${encodeURIComponent(visor.archivo)}`);
   }
 
   const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?|avif|heic|heif|ico|svg)$/i;
@@ -1434,7 +1500,7 @@ function pct($n, $d): int {
         fd.append('paths[]', name);
       }
       try {
-        const resp = await fetch('?action=upload_imagenes', {
+        const resp = await fetch(appendWorkspace('?action=upload_imagenes'), {
           method: 'POST',
           headers: { 'accept': 'application/json' },
           body: fd
@@ -1694,6 +1760,8 @@ function pct($n, $d): int {
     if (switchAutoTablas) switchAutoTablas.checked = !!on;
     if (!on) {
       autoTablasRunning = false;
+      if (indexWorker && window.APP_WORKSPACE) indexWorker.postMessage({ type: 'remove', mode: 'download', ws: window.APP_WORKSPACE });
+      stopIndexAutoStatsPolling();
       setStatus(stTablas, 'neutral', 'Auto detenido');
       await appendLog('info', 'Auto tablas detenido.');
       await refreshLogPanel();
@@ -1704,7 +1772,12 @@ function pct($n, $d): int {
     setStatus(stTablas, 'neutral', 'Auto en ejecución…');
     await appendLog('info', 'Auto tablas iniciado.');
     await refreshLogPanel();
-    autoLoopTablas();
+    if (indexWorker && window.APP_WORKSPACE) {
+      startIndexAutoStatsPolling();
+      indexWorker.postMessage({ type: 'add', mode: 'download', ws: window.APP_WORKSPACE });
+    } else {
+      autoLoopTablas();
+    }
   }
 
   if (switchAutoTablas) switchAutoTablas.addEventListener('change', () => setAutoTablas(switchAutoTablas.checked));
@@ -1715,7 +1788,7 @@ function pct($n, $d): int {
 
   async function appendLog(type, message) {
     try {
-      await fetch('?action=log_append', {
+      await fetch(appendWorkspace('?action=log_append'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ type: type || 'info', message: String(message || '').trim() })
@@ -1748,7 +1821,7 @@ function pct($n, $d): int {
   if (btnLogClear) {
     btnLogClear.addEventListener('click', async () => {
       try {
-        await fetch('?action=log_clear', { method: 'POST', headers: { 'accept': 'application/json' } });
+        await fetch(appendWorkspace('?action=log_clear'), { method: 'POST', headers: { 'accept': 'application/json' } });
         await refreshLogPanel();
       } catch (e) {}
     });
@@ -1764,6 +1837,14 @@ function pct($n, $d): int {
     await refreshStats();
     await loadEtiquetas();
     await refreshLogPanel();
+    // Auto-inicio desde Workspaces: Descargar o Clasificar en esta pestaña
+    if (window.APP_AUTO === 'descargar' && switchAutoTablas) {
+      switchAutoTablas.checked = true;
+      setAutoTablas(true);
+    } else if (window.APP_AUTO === 'clasificar' && switchAuto) {
+      switchAuto.checked = true;
+      setAuto(true);
+    }
   })();
 </script>
 

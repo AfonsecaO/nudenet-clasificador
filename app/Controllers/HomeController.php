@@ -58,13 +58,22 @@ class HomeController extends BaseController
                 $totalTablasEstado = count($tablasDelEstado);
             }
             
+            // Workspace por URL: para workers en paralelo (varias pestañas), enviar en cada API call
+            $appWorkspaceSlug = null;
+            if (\App\Services\WorkspaceService::hasRequestOverride()) {
+                $appWorkspaceSlug = \App\Services\WorkspaceService::current();
+            }
+            $autoParam = isset($_GET['auto']) && in_array($_GET['auto'], ['descargar', 'clasificar'], true) ? $_GET['auto'] : null;
+
             // Preparar datos para la vista
             $data = [
                 'mode' => $mode,
                 'pattern' => ($mode === 'db_and_images') ? ConfigService::obtenerRequerido('TABLE_PATTERN') : '',
                 'totalTablasEstado' => $totalTablasEstado,
                 'tablasDelEstado' => $tablasDelEstado,
-                'estadoProcesamiento' => $estadoProcesamiento
+                'estadoProcesamiento' => $estadoProcesamiento,
+                'app_workspace_slug' => $appWorkspaceSlug,
+                'auto_param' => $autoParam,
             ];
             
             // Renderizar vista
