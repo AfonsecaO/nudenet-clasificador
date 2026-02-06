@@ -1,15 +1,18 @@
 /**
- * Web Worker: procesamiento paralelo de workspaces (descarga de tablas y clasificación).
- * Las URLs se resuelven contra la página (baseUrl), no contra el script del worker.
- * Por cada workspace (contenedor) solo hay una petición activa; la siguiente se envía
- * solo cuando termina la anterior. Cada contenedor es independiente.
+ * Web Worker: descarga y clasificación por workspaces.
+ * - Cada contenedor es independiente: descarga y clasificación inician en seguida al activarlos.
+ * - Dentro de un mismo contenedor, descarga y clasificación son independientes: pueden correr las dos a la vez (una petición a la vez por tipo).
+ * - Varios contenedores pueden estar en descarga y/o clasificación en paralelo.
+ * Sin polling: la UI se actualiza con cada mensaje 'tick'.
  */
 const downloadSet = new Set();
 const classifySet = new Set();
 let stopRequested = false;
 let baseUrl = '';
-/** Workspaces que tienen actualmente un loop en ejecución (solo uno por ws) */
-const runningWorkspace = new Set();
+/** Workspaces que tienen un loop de descarga activo */
+const downloadRunning = new Set();
+/** Workspaces que tienen un loop de clasificación activo */
+const classifyRunning = new Set();
 
 function buildUrl(action, ws) {
   const params = `action=${encodeURIComponent(action)}&workspace=${encodeURIComponent(ws)}`;
@@ -52,7 +55,6 @@ async function runClassifyLoop(ws) {
     const { ok, data } = await fetchJson(url);
     self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data });
     if (!ok || !data?.success) break;
-    // Solo marcar "done" cuando el backend indica explícitamente que no hay más trabajo
     const noMoreWork = data?.procesada === false && (data?.pendientes ?? data?.pending ?? 0) === 0;
     if (noMoreWork) {
       classifySet.delete(ws);
@@ -63,28 +65,24 @@ async function runClassifyLoop(ws) {
   }
 }
 
-/**
- * Inicia una sola tarea para este workspace (descarga o clasificación) si no hay ninguna en curso.
- * Cuando termina esa tarea, se llama de nuevo para procesar la siguiente en cola del mismo contenedor.
- */
-function tryStartOne(ws) {
-  if (runningWorkspace.has(ws)) return;
-  if (downloadSet.has(ws)) {
-    runningWorkspace.add(ws);
-    runDownloadLoop(ws).finally(() => {
-      runningWorkspace.delete(ws);
-      tryStartOne(ws);
-    });
-    return;
-  }
-  if (classifySet.has(ws)) {
-    runningWorkspace.add(ws);
-    runClassifyLoop(ws).finally(() => {
-      runningWorkspace.delete(ws);
-      tryStartOne(ws);
-    });
-    return;
-  }
+/** Inicia descarga para este workspace si está en cola y no tiene descarga activa. */
+function tryStartDownload(ws) {
+  if (downloadRunning.has(ws) || !downloadSet.has(ws)) return;
+  downloadRunning.add(ws);
+  runDownloadLoop(ws).finally(() => {
+    downloadRunning.delete(ws);
+    if (downloadSet.has(ws)) tryStartDownload(ws);
+  });
+}
+
+/** Inicia clasificación para este workspace si está en cola y no tiene clasificación activa. */
+function tryStartClassify(ws) {
+  if (classifyRunning.has(ws) || !classifySet.has(ws)) return;
+  classifyRunning.add(ws);
+  runClassifyLoop(ws).finally(() => {
+    classifyRunning.delete(ws);
+    if (classifySet.has(ws)) tryStartClassify(ws);
+  });
 }
 
 self.onmessage = function (e) {
@@ -98,11 +96,11 @@ self.onmessage = function (e) {
       stopRequested = false;
       if (msg.mode === 'download' && msg.ws) {
         downloadSet.add(msg.ws);
-        tryStartOne(msg.ws);
+        tryStartDownload(msg.ws);
         self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
       } else if (msg.mode === 'classify' && msg.ws) {
         classifySet.add(msg.ws);
-        tryStartOne(msg.ws);
+        tryStartClassify(msg.ws);
         self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
       }
       break;

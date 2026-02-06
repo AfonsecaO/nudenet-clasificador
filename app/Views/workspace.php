@@ -354,9 +354,9 @@ function fmtTs($ts): string {
     const imgEl = container.querySelector('.ws-stat-num[data-stat="images"]');
     const pendEl = container.querySelector('.ws-stat-num[data-stat="pending"]');
     const detEl = container.querySelector('.ws-stat-num[data-stat="detections"]');
-    if (imgEl) imgEl.textContent = (statsClasificacion.total ?? 0).toLocaleString();
-    if (pendEl) pendEl.textContent = (statsClasificacion.pendientes_deteccion ?? statsClasificacion.pendientes ?? 0).toLocaleString();
-    if (detEl) detEl.textContent = (statsClasificacion.detections_total ?? 0).toLocaleString();
+    if (statsClasificacion.total !== undefined && imgEl) imgEl.textContent = Number(statsClasificacion.total).toLocaleString();
+    if ((statsClasificacion.pendientes_deteccion !== undefined || statsClasificacion.pendientes !== undefined) && pendEl) pendEl.textContent = Number(statsClasificacion.pendientes_deteccion ?? statsClasificacion.pendientes ?? 0).toLocaleString();
+    if (statsClasificacion.detections_total !== undefined && detEl) detEl.textContent = Number(statsClasificacion.detections_total).toLocaleString();
   }
 
   function formatMetrics(type, stats, extra) {
@@ -371,32 +371,25 @@ function fmtTs($ts): string {
     return '—';
   }
 
-  async function refreshPanelStats() {
-    const items = [];
-    downloadQueue.forEach((ws) => items.push({ ws, type: 'descargar' }));
-    classifyQueue.forEach((ws) => items.push({ ws, type: 'clasificar' }));
-    for (const { ws, type } of items) {
-      const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
-      if (type === 'descargar') {
-        await fetchStatsDescarga(ws);
-        const statsCard = await fetchStatsClasificacion(ws);
-        updateCardStats(ws, statsCard);
-        if (el) el.textContent = formatMetrics(type, null, { imagenes_totales: statsCard?.total ?? 0 });
-      } else {
-        const stats = await fetchStatsClasificacion(ws);
-        updateCardStats(ws, stats);
-        if (el) el.textContent = formatMetrics(type, stats);
-      }
+  function applyTickToPanel(msg) {
+    const { mode, ws, data } = msg;
+    if (!data || !ws) return;
+    const type = mode === 'download' ? 'descargar' : 'clasificar';
+    const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
+    if (mode === 'download') {
+      const stats = data?.clasificacion_stats;
+      const imagenes = stats && (typeof stats.total === 'number') ? stats.total : null;
+      if (el) el.textContent = formatMetrics(type, null, { imagenes_totales: imagenes ?? 0 });
+      if (stats) updateCardStats(ws, { total: stats.total, pendientes: stats.pendientes, pendientes_deteccion: stats.pendientes_deteccion ?? stats.pendientes, detections_total: stats.detections_total });
+    } else {
+      const pendientes = data?.pendientes ?? data?.pendientes_deteccion ?? data?.pending ?? 0;
+      if (el) el.textContent = formatMetrics(type, { pendientes_deteccion: pendientes, pendientes });
+      updateCardStats(ws, {
+        total: data?.stats?.total ?? data?.total,
+        pendientes: data?.pendientes,
+        pendientes_deteccion: data?.pendientes_deteccion ?? data?.pendientes
+      });
     }
-  }
-
-  let statsIntervalId = null;
-  function startStatsPolling() {
-    if (statsIntervalId) return;
-    statsIntervalId = setInterval(refreshPanelStats, 4000);
-  }
-  function stopStatsPolling() {
-    if (statsIntervalId) { clearInterval(statsIntervalId); statsIntervalId = null; }
   }
 
   if (worker) {
@@ -405,12 +398,12 @@ function fmtTs($ts): string {
       if (msg?.type === 'state') {
         syncQueuesFromState(msg);
         updateProcessingPanel();
-        if (downloadQueue.size === 0 && classifyQueue.size === 0) stopStatsPolling();
       } else if (msg?.type === 'done') {
         if (msg.mode === 'download') downloadQueue.delete(msg.ws);
         else classifyQueue.delete(msg.ws);
         updateProcessingPanel();
-        if (downloadQueue.size === 0 && classifyQueue.size === 0) stopStatsPolling();
+      } else if (msg?.type === 'tick') {
+        applyTickToPanel(msg);
       }
     };
   }
@@ -421,7 +414,6 @@ function fmtTs($ts): string {
       if (!ws) return;
       downloadQueue.add(ws);
       updateProcessingPanel();
-      startStatsPolling();
       if (worker) worker.postMessage({ type: 'add', mode: 'download', ws });
       else { mainThreadStopRequested = false; runDownloadLoopMain(ws); }
     });
@@ -432,7 +424,6 @@ function fmtTs($ts): string {
       if (!ws) return;
       classifyQueue.add(ws);
       updateProcessingPanel();
-      startStatsPolling();
       if (worker) worker.postMessage({ type: 'add', mode: 'classify', ws });
       else { mainThreadStopRequested = false; runClassifyLoopMain(ws); }
     });
@@ -444,7 +435,6 @@ function fmtTs($ts): string {
       classifyQueue.clear();
       if (worker) worker.postMessage({ type: 'stopAll' });
       else mainThreadStopRequested = true;
-      stopStatsPolling();
       updateProcessingPanel();
     });
   }
