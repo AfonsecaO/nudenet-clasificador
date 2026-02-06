@@ -83,6 +83,14 @@ class Router
                 $route = 'workspace_select';
             }
 
+            // Workspace por request: permite abrir varias pestañas con distintos workspaces (workers en paralelo).
+            if (isset($_REQUEST['workspace']) && is_string($_REQUEST['workspace'])) {
+                $slug = \App\Services\WorkspaceService::slugify(trim($_REQUEST['workspace']));
+                if ($slug !== '' && \App\Services\WorkspaceService::exists($slug)) {
+                    \App\Services\WorkspaceService::setRequestOverride($slug);
+                }
+            }
+
             // Workspace gating: antes de tocar SQLite
             $ws = \App\Services\WorkspaceService::current();
             if ($ws === null && !self::isWorkspaceRoute((string)$route)) {

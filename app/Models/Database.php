@@ -53,42 +53,43 @@ class Database
     }
 
     /**
-     * Busca tablas que coincidan con el patrón
-     * El patrón puede usar ? como comodín para un solo carácter
-     * 
-     * @param string $pattern Patrón de búsqueda (ej: ia?validacion?facial)
+     * Busca tablas que coincidan con el patrón.
+     * Comodines: ? = un carácter, * = cero o más caracteres.
+     * Sin comodines = coincidencia exacta (ej: "ia_miner" solo esa tabla).
+     *
+     * @param string $pattern Patrón (ej: "ia_miner", "ia_miner?", "ia_miner*", "ia_*_facial")
      * @return array Lista de nombres de tablas encontradas
      */
     public function buscarTablasPorPatron($pattern)
     {
-        // Primero escapar los caracteres especiales de SQL que ya existen en el patrón
-        // Escapar % y _ literales antes de convertir los comodines
-        $escapedPattern = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $pattern);
-        
-        // Convertir el comodín ? a _ (comodín SQL para un solo carácter)
-        $likePattern = str_replace('?', '_', $escapedPattern);
-        
-        // Agregar % al inicio y final para buscar en cualquier parte del nombre de la tabla
-        $likePattern = '%' . $likePattern . '%';
-        
-        $sql = "SELECT TABLE_NAME 
-                FROM INFORMATION_SCHEMA.TABLES 
-                WHERE TABLE_SCHEMA = :db_name 
-                AND TABLE_NAME LIKE :pattern
-                ORDER BY TABLE_NAME ASC";
+        $pattern = trim((string) $pattern);
+        $hasWildcards = (strpos($pattern, '?') !== false || strpos($pattern, '*') !== false);
+
+        if (!$hasWildcards) {
+            $sql = "SELECT TABLE_NAME 
+                    FROM INFORMATION_SCHEMA.TABLES 
+                    WHERE TABLE_SCHEMA = :db_name 
+                    AND TABLE_NAME = :pattern
+                    ORDER BY TABLE_NAME ASC";
+            $params = [':db_name' => $this->dbName, ':pattern' => $pattern];
+        } else {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $pattern);
+            $likePattern = str_replace(['*', '?'], ['%', '_'], $escaped);
+            $sql = "SELECT TABLE_NAME 
+                    FROM INFORMATION_SCHEMA.TABLES 
+                    WHERE TABLE_SCHEMA = :db_name 
+                    AND TABLE_NAME LIKE :pattern
+                    ORDER BY TABLE_NAME ASC";
+            $params = [':db_name' => $this->dbName, ':pattern' => $likePattern];
+        }
 
         try {
             $stmt = $this->connection->prepare($sql);
-            $stmt->execute([
-                ':db_name' => $this->dbName,
-                ':pattern' => $likePattern
-            ]);
-
+            $stmt->execute($params);
             $tablas = [];
             while ($row = $stmt->fetch()) {
                 $tablas[] = $row['TABLE_NAME'];
             }
-
             return $tablas;
         } catch (PDOException $e) {
             throw new \Exception("Error al buscar tablas: " . $e->getMessage());

@@ -12,6 +12,25 @@ class WorkspaceService
 {
     public const COOKIE_NAME = 'ws';
 
+    /** Workspace solo para esta request (p. ej. ?workspace=miner para workers en paralelo). No se escribe cookie. */
+    private static $requestOverride = null;
+
+    /**
+     * Fija el workspace solo para la request actual (para procesar en pestañas independientes).
+     */
+    public static function setRequestOverride(string $slug): void
+    {
+        $slug = self::slugify($slug);
+        if (self::isValidSlug($slug) && self::exists($slug)) {
+            self::$requestOverride = $slug;
+        }
+    }
+
+    public static function hasRequestOverride(): bool
+    {
+        return self::$requestOverride !== null;
+    }
+
     /**
      * Raíz absoluta del directorio de workspaces.
      */
@@ -44,10 +63,13 @@ class WorkspaceService
     }
 
     /**
-     * Lee el workspace actual desde cookie (si existe y es válido).
+     * Lee el workspace actual: primero override de request (?workspace=), si no cookie.
      */
     public static function current(): ?string
     {
+        if (self::$requestOverride !== null) {
+            return self::$requestOverride;
+        }
         $raw = $_COOKIE[self::COOKIE_NAME] ?? null;
         if (!is_string($raw) || trim($raw) === '') return null;
         $slug = self::slugify($raw);

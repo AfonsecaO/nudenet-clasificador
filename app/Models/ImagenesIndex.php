@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\HeicConverter;
+use App\Services\ImageCompressor;
 use App\Services\StringNormalizer;
 
 /**
@@ -233,6 +234,7 @@ class ImagenesIndex
                 $jpgPath = HeicConverter::convertFileToJpg($rutaCompleta);
                 if ($jpgPath === null) continue;
                 $rutaCompleta = $jpgPath;
+                $ext = 'jpg';
             }
             $rutaNorm = str_replace('\\', '/', $rutaCompleta);
             $rutaRel = $rutaNorm;
@@ -240,6 +242,61 @@ class ImagenesIndex
                 $rutaRel = substr($rutaNorm, strlen($baseNorm) + 1);
             }
             $rutaRel = self::normalizarRelativa($rutaRel);
+
+            // Normalizar nombre de archivo/ruta (renombrar si tiene caracteres extraños)
+            $rutaRelNormalized = StringNormalizer::normalizeRelativePath($rutaRel);
+            if ($rutaRelNormalized !== '' && $rutaRelNormalized !== $rutaRel) {
+                $targetFull = $baseNorm . '/' . $rutaRelNormalized;
+                $currentReal = realpath($rutaCompleta);
+                if ($currentReal === false) continue;
+                if (!file_exists($targetFull) || realpath($targetFull) === $currentReal) {
+                    $targetDir = dirname($targetFull);
+                    if (!is_dir($targetDir)) {
+                        @mkdir($targetDir, 0755, true);
+                    }
+                    if (@rename($rutaCompleta, $targetFull)) {
+                        $rutaCompleta = $targetFull;
+                        $rutaRel = $rutaRelNormalized;
+                    }
+                } else {
+                    // Destino existe y es otro archivo: generar nombre único
+                    $dirPart = dirname($rutaRelNormalized);
+                    $basePart = pathinfo($rutaRelNormalized, PATHINFO_FILENAME);
+                    $extPart = pathinfo($rutaRelNormalized, PATHINFO_EXTENSION);
+                    if ($basePart === '') continue;
+                    $suffix = 2;
+                    while (true) {
+                        $candidateRel = ($dirPart !== '.' && $dirPart !== '') ? $dirPart . '/' . $basePart . '_' . $suffix . '.' . $extPart : $basePart . '_' . $suffix . '.' . $extPart;
+                        $candidateFull = $baseNorm . '/' . $candidateRel;
+                        if (!file_exists($candidateFull)) {
+                            $targetDir = dirname($candidateFull);
+                            if (!is_dir($targetDir)) {
+                                @mkdir($targetDir, 0755, true);
+                            }
+                            if (@rename($rutaCompleta, $candidateFull)) {
+                                $rutaCompleta = $candidateFull;
+                                $rutaRel = $candidateRel;
+                            }
+                            break;
+                        }
+                        $suffix++;
+                        if ($suffix > 10000) break;
+                    }
+                }
+            }
+
+            // Comprimir imagen (jpg/png) para reducir peso; sobrescribir si el resultado es más pequeño
+            if (in_array($ext, ['jpg', 'jpeg', 'png'], true)) {
+                $content = @file_get_contents($rutaCompleta);
+                if ($content !== false && $content !== '') {
+                    $extForCompress = ($ext === 'jpeg') ? 'jpg' : $ext;
+                    $compressed = ImageCompressor::compress($content, $extForCompress);
+                    if ($compressed !== null && strlen($compressed) < strlen($content)) {
+                        @file_put_contents($rutaCompleta, $compressed);
+                    }
+                }
+            }
+
             $carpeta = self::normalizarCarpeta($rutaRel);
             $archivo = basename($rutaRel);
 

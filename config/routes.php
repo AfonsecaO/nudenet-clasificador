@@ -51,6 +51,11 @@ return [
         'method' => 'estadisticas',
         'type' => 'api'
     ],
+    'estadisticas_descarga' => [
+        'controller' => 'ProcesarController',
+        'method' => 'estadisticasDescarga',
+        'type' => 'api'
+    ],
     'etiquetas_detectadas' => [
         'controller' => 'ImagenesController',
         'method' => 'etiquetasDetectadas',

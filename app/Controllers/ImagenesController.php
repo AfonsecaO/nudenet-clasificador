@@ -118,6 +118,11 @@ class ImagenesController extends BaseController
         try {
             $imagenesIndex = new ImagenesIndex();
             $stats = $imagenesIndex->getStats(true);
+            $statsDet = $imagenesIndex->getStatsDeteccion(true);
+            $stats['pendientes_deteccion'] = (int)($statsDet['pendientes'] ?? 0);
+            $pdo = \App\Services\SqliteConnection::get();
+            $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+            $stats['detections_total'] = ($detCount !== false) ? (int)$detCount : 0;
 
             $this->jsonResponse([
                 'success' => true,

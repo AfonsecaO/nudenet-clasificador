@@ -572,6 +572,16 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 .form-text.text-muted { font-size: 0.8125rem; color: var(--text-muted); margin-top: 0.25rem; }
+.table-pattern-hint {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.table-pattern-hint-line {
+  margin-bottom: 0.5rem;
+}
+.table-pattern-hint-line:last-child { margin-bottom: 0; }
+.table-pattern-hint code, .table-pattern-hint kbd { font-size: 0.8125rem; }
 /* Línea de estado (feedback): discreta, sin sensación de separador */
 .status-line {
   font-size: 0.75rem;
@@ -1808,65 +1818,386 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 /* hr */
 hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
-/* Página Workspaces — 4 por fila, tarjetas más grandes */
-.page-workspaces .container { max-width: 1680px; }
-.workspaces-header { margin-bottom: 2rem; }
-.workspaces-title {
+/* ========== Página Workspaces — UI rediseñada ========== */
+.page-workspaces .main { padding-top: 1.25rem; padding-left: 1rem; padding-right: 1rem; }
+.page-workspaces .ws-container { max-width: none; width: 100%; padding-left: 0; padding-right: 0; }
+
+.ws-header {
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.ws-header-title {
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.03em;
   margin: 0 0 0.25rem 0;
+  color: var(--text);
+}
+.ws-header-desc {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  max-width: 36rem;
+}
+
+/* Empty state */
+.ws-empty {
+  text-align: center;
+  padding: 3rem 1.5rem;
+  background: var(--bg-surface);
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+}
+.ws-empty-icon {
+  font-size: 2.5rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  opacity: 0.7;
+}
+.ws-empty-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  color: var(--text);
+}
+.ws-empty-desc {
+  color: var(--text-muted);
+  margin: 0 0 1.25rem 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* Grid de tarjetas — contenedores grandes */
+.ws-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.ws-card {
+  background: var(--bg-surface);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  overflow: hidden;
+  position: relative;
+}
+.ws-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--border);
+  border-radius: 12px 0 0 12px;
+}
+.ws-card--ok::before { background: var(--success); opacity: 0.9; }
+.ws-card--pending::before { background: var(--warning); opacity: 0.85; }
+.ws-card--current::before { background: var(--info); width: 5px; }
+.ws-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.ws-card-inner {
+  padding: 1.25rem 1.35rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ws-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.ws-card-name-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.ws-card-status {
+  font-size: 1.35rem;
+  flex-shrink: 0;
+}
+.ws-card--ok .ws-card-status { color: var(--success); }
+.ws-card--pending .ws-card-status { color: var(--text-muted); }
+.ws-card-name {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--text);
+  line-height: 1.2;
+}
+.ws-card-badge-current {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.25rem 0.5rem;
+  border-radius: 5px;
+  background: var(--info-bg);
+  color: var(--info);
+  flex-shrink: 0;
+}
+.ws-card-delete {
+  padding: 0.35rem;
+  color: var(--text-muted) !important;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.ws-card-delete:hover {
+  color: var(--danger) !important;
+  background: var(--danger-bg);
+}
+
+.ws-card-path {
+  font-size: 0.8125rem;
+  font-family: ui-monospace, monospace;
+  color: var(--text-muted);
+  margin: 0;
+  word-break: break-all;
+  line-height: 1.35;
+}
+.ws-card-created {
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+
+.ws-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.ws-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 5px;
+  letter-spacing: 0.02em;
+}
+.ws-badge--ok {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.ws-badge--warn {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.ws-badge--mode {
+  background: var(--soft-chip-bg);
+  color: var(--soft-chip);
+}
+
+.ws-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin: 0;
+}
+.ws-stat {
+  text-align: center;
+  padding: 0.7rem 0.5rem;
+  background: var(--bg-page);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.ws-stat-num {
+  display: block;
+  font-weight: 700;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1.2;
+}
+.ws-stat-lbl {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  line-height: 1.2;
+}
+.ws-stat-lbl i {
+  font-size: 0.7rem;
+  opacity: 0.85;
+  margin-right: 0.2rem;
+}
+
+/* Botones: grid 2x2, todos el mismo ancho, menos espacio */
+.ws-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  padding-top: 0.6rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid var(--border);
+}
+.ws-card-actions .btn {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 8px;
+  border-width: 1px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  text-align: center;
+}
+.ws-card-actions .btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.ws-card-actions .btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.ws-card-actions .btn:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+.ws-card-actions .btn i {
+  margin-right: 0.35rem;
+  opacity: 0.95;
+  flex-shrink: 0;
+}
+/* Fila 1: Entrar (ocupa todo o primera celda), Parametrización */
+.ws-card-actions .btnEnterWs {
+  order: 1;
+}
+.ws-card-actions .btnSetupWs {
+  order: 2;
+}
+/* Fila 2: Descargar, Clasificar */
+.ws-card-actions .btnWsDescargar {
+  order: 3;
+}
+.ws-card-actions .btnWsClasificar {
+  order: 4;
+}
+/* Entrar: CTA principal, destaca en la primera posición */
+.ws-card-actions .btnEnterWs.btn-primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+.ws-card-actions .btnEnterWs.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+  color: #fff;
+}
+/* Parametrización: secundario neutro, mismo peso visual que Entrar en la fila */
+.ws-card-actions .btnSetupWs {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.ws-card-actions .btnSetupWs:hover:not(:disabled) {
+  background: var(--bg-page);
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+/* Descargar y Clasificar: misma fila, estilos de acción (info / success) */
+.ws-card-actions .btnWsDescargar {
+  background: var(--info-bg);
+  color: var(--info);
+  border: 1px solid rgba(2, 132, 199, 0.25);
+}
+.ws-card-actions .btnWsDescargar:hover:not(:disabled) {
+  background: var(--info);
+  color: #fff;
+  border-color: var(--info);
+}
+.ws-card-actions .btnWsClasificar {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid rgba(5, 150, 105, 0.25);
+}
+.ws-card-actions .btnWsClasificar:hover:not(:disabled) {
+  background: var(--success);
+  color: #fff;
+  border-color: var(--success);
+}
+
+/* Panel Procesando */
+.ws-processing {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+.ws-processing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+}
+.ws-processing-label {
+  font-size: 0.9rem;
+  font-weight: 600;
   color: var(--text);
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
 }
-.workspaces-title i { color: var(--info); }
-.workspaces-subtitle { margin: 0; font-size: 0.9375rem; color: var(--text-muted); }
-
-.workspaces-empty {
-  text-align: center;
-  padding: 3rem 1.5rem;
-  background: var(--bg-surface);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-}
-.workspaces-empty-icon {
-  font-size: 2.5rem;
-  color: var(--text-muted);
-  margin-bottom: 1rem;
-}
-.workspaces-empty-title { font-size: 1.125rem; margin: 0 0 0.5rem 0; color: var(--text); }
-.workspaces-empty-text { color: var(--text-muted); margin: 0 0 1.25rem 0; font-size: 0.9375rem; }
-
-.workspace-card {
-  height: 100%;
-  min-height: 360px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-}
-.workspace-card:hover { box-shadow: var(--shadow-md); }
-.workspace-card--current { border-left: 4px solid var(--info); }
-.workspace-card-header { padding: 1.25rem 1.5rem; background: var(--bg-page); border-bottom: 1px solid var(--border); }
-.workspace-card-icon { margin-right: 0.5rem; font-size: 1.35rem; }
-.workspace-card-title { font-size: 1.25rem; font-weight: 600; }
-.workspace-card .card-body { padding: 1.5rem 1.5rem; }
-.workspace-card-path { word-break: break-all; font-size: 0.9375rem; }
-.workspace-card-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.875rem 1.25rem;
-  margin-top: 1.25rem;
-}
-.workspace-stat {
+.ws-processing-label .fa-spin { color: var(--info); }
+.ws-processing-list {
+  padding: 0.65rem 1rem;
   display: flex;
   flex-direction: column;
-  padding: 0.875rem 1.25rem;
-  background: var(--bg-page);
-  border-radius: var(--radius-sm);
+  gap: 0.45rem;
 }
-.workspace-stat-value { font-weight: 600; font-size: 1.375rem; color: var(--text); }
-.workspace-stat-label { font-size: 0.875rem; color: var(--text-muted); margin-top: 0.25rem; }
-.workspace-card-meta { font-size: 0.875rem; margin-top: 1.25rem; }
-.workspace-card-footer { padding: 1.25rem 1.5rem; }
-.workspace-card-footer .btn { padding: 0.5rem 1rem; font-size: 0.9375rem; }
+.ws-processing-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-page);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+.ws-processing-ws {
+  font-weight: 600;
+  color: var(--text);
+  min-width: 5.5rem;
+}
+.ws-processing-type {
+  color: var(--text-muted);
+}
+.ws-processing-stats,
+.ws-processing-metrics {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 10rem;
+  line-height: 1.35;
+}
+.ws-processing-metrics {
+  max-width: 100%;
+  word-break: break-word;
+}
+.ws-processing-item .btnStopOne {
+  margin-left: auto;
+}
