@@ -37,11 +37,11 @@ function fmtTs($ts): string {
 
     <?php if (!empty($workspaces)): ?>
     <div id="workspaceProcessingPanel" class="ws-processing" style="display: none;">
-      <div class="ws-processing-head">
+      <div class="ws-processing-bar">
         <span class="ws-processing-label"><i class="fas fa-sync-alt fa-spin" aria-hidden="true"></i> Procesando</span>
+        <div id="workspaceProcessingList" class="ws-processing-list"></div>
         <button type="button" class="btn btn-outline-secondary btn-sm" id="btnStopAll" title="Detener todos">Detener todos</button>
       </div>
-      <div id="workspaceProcessingList" class="ws-processing-list"></div>
     </div>
     <?php endif; ?>
 
@@ -299,14 +299,14 @@ function fmtTs($ts): string {
     }
     if (panelEl) panelEl.style.display = 'block';
     listEl.innerHTML = items.map((it) =>
-      `<div class="ws-processing-item" data-ws="${it.ws}" data-type="${it.type}">
+      `<div class="ws-processing-chip" data-ws="${it.ws}" data-type="${it.type}">
         <span class="ws-processing-ws">${it.ws}</span>
         <span class="ws-processing-type">${it.label}</span>
-        <div class="ws-processing-metrics" data-ws="${it.ws}" data-type="${it.type}">—</div>
-        <button type="button" class="btn btn-outline-danger btn-sm btnStopOne" data-ws="${it.ws}" data-type="${it.type}" title="Quitar de la cola">Quitar</button>
+        <span class="ws-processing-metrics" data-ws="${it.ws}" data-type="${it.type}">—</span>
+        <button type="button" class="ws-processing-remove btnStopOne" data-ws="${it.ws}" data-type="${it.type}" title="Quitar" aria-label="Quitar">×</button>
       </div>`
     ).join('');
-    listEl.querySelectorAll('.btnStopOne').forEach((btn) => {
+    listEl.querySelectorAll('.ws-processing-remove').forEach((btn) => {
       btn.addEventListener('click', () => {
         const ws = btn.getAttribute('data-ws');
         const type = btn.getAttribute('data-type');
@@ -359,21 +359,16 @@ function fmtTs($ts): string {
     if (detEl) detEl.textContent = (statsClasificacion.detections_total ?? 0).toLocaleString();
   }
 
-  function formatMetrics(type, stats) {
-    if (!stats) return '—';
+  function formatMetrics(type, stats, extra) {
     if (type === 'descargar') {
-      const r = stats.registros_procesados ?? 0;
-      const t = stats.total_registros ?? 0;
-      const p = stats.pendientes ?? 0;
-      const tablas = (stats.tablas_completadas != null && stats.tablas_total != null)
-        ? ` · Tablas ${stats.tablas_completadas}/${stats.tablas_total}`
-        : '';
-      return `Registros descargados: ${r.toLocaleString()} · Faltan: ${p.toLocaleString()}${tablas}`;
+      const n = extra?.imagenes_totales ?? 0;
+      return `Imágenes: ${Number(n).toLocaleString()}`;
     }
-    const total = stats.total ?? 0;
-    const procesadas = stats.procesadas ?? 0;
-    const pendientes = stats.pendientes ?? 0;
-    return `Imágenes: ${total.toLocaleString()} · Procesadas: ${procesadas.toLocaleString()} · Pendientes clasificar: ${pendientes.toLocaleString()}`;
+    if (type === 'clasificar') {
+      const n = stats?.pendientes_deteccion ?? stats?.pendientes ?? 0;
+      return `Pendientes: ${Number(n).toLocaleString()}`;
+    }
+    return '—';
   }
 
   async function refreshPanelStats() {
@@ -381,18 +376,16 @@ function fmtTs($ts): string {
     downloadQueue.forEach((ws) => items.push({ ws, type: 'descargar' }));
     classifyQueue.forEach((ws) => items.push({ ws, type: 'clasificar' }));
     for (const { ws, type } of items) {
-      let stats;
+      const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
       if (type === 'descargar') {
-        stats = await fetchStatsDescarga(ws);
-        const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
-        if (el) el.textContent = formatMetrics(type, stats);
+        await fetchStatsDescarga(ws);
         const statsCard = await fetchStatsClasificacion(ws);
         updateCardStats(ws, statsCard);
+        if (el) el.textContent = formatMetrics(type, null, { imagenes_totales: statsCard?.total ?? 0 });
       } else {
-        stats = await fetchStatsClasificacion(ws);
-        const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
-        if (el) el.textContent = formatMetrics(type, stats);
+        const stats = await fetchStatsClasificacion(ws);
         updateCardStats(ws, stats);
+        if (el) el.textContent = formatMetrics(type, stats);
       }
     }
   }
