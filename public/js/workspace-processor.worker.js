@@ -37,10 +37,9 @@ async function runDownloadLoop(ws) {
     const { ok, data } = await fetchJson(url);
     self.postMessage({ type: 'tick', mode: 'download', ws, ok, data });
     if (!ok || !data?.success) break;
-    const msg = String(data?.mensaje || '');
+    // Solo terminar cuando no queden registros en ninguna tabla (siguiente petición seguirá con otra tabla si hay)
     const noMoreWork = data?.registro_procesado === false;
-    const completedMsg = msg.includes('completada') || msg.includes('No se encontraron tablas');
-    if (noMoreWork || completedMsg) {
+    if (noMoreWork) {
       downloadSet.delete(ws);
       self.postMessage({ type: 'done', mode: 'download', ws });
       break;

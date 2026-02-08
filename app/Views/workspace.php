@@ -387,7 +387,8 @@ function fmtTs($ts): string {
       updateCardStats(ws, {
         total: data?.stats?.total ?? data?.total,
         pendientes: data?.pendientes,
-        pendientes_deteccion: data?.pendientes_deteccion ?? data?.pendientes
+        pendientes_deteccion: data?.pendientes_deteccion ?? data?.pendientes,
+        detections_total: data?.detections_total
       });
     }
   }

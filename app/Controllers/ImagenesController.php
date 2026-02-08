@@ -152,7 +152,9 @@ class ImagenesController extends BaseController
             if ($siguiente === null) {
                 $stats = $imagenesIndex->getStats(true);
                 $statsDet = $imagenesIndex->getStatsDeteccion(true);
-                $pendientesTotal = (int)($stats['pendientes'] ?? 0) + (int)($statsDet['pendientes'] ?? 0);
+                $pdo = \App\Services\SqliteConnection::get();
+                $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+                $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
                 $this->jsonResponse([
                     'success' => true,
                     'procesada' => false,
@@ -160,6 +162,7 @@ class ImagenesController extends BaseController
                     'pendientes' => (int)($stats['pendientes'] ?? 0),
                     'pendientes_clasificacion' => (int)($stats['pendientes'] ?? 0),
                     'pendientes_deteccion' => (int)($statsDet['pendientes'] ?? 0),
+                    'detections_total' => $detectionsTotal,
                     'stats' => $stats,
                     'stats_deteccion' => $statsDet
                 ]);
@@ -174,6 +177,9 @@ class ImagenesController extends BaseController
                 $statsDet = $imagenesIndex->getStatsDeteccion(true);
                 $pendientesClas = (int)($stats['pendientes'] ?? 0);
                 $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
+                $pdo = \App\Services\SqliteConnection::get();
+                $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+                $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
                 $this->jsonResponse([
                     'success' => true,
                     'tag' => 'error',
@@ -185,6 +191,7 @@ class ImagenesController extends BaseController
                     'pendientes_clasificacion' => $pendientesClas,
                     'pendientes_deteccion' => $pendientesDet,
                     'pendientes_total' => ($pendientesClas + $pendientesDet),
+                    'detections_total' => $detectionsTotal,
                     'stats' => $stats,
                     'stats_deteccion' => $statsDet
                 ]);
@@ -345,6 +352,9 @@ class ImagenesController extends BaseController
             $pendientesClas = (int)($stats['pendientes'] ?? 0);
             $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
             $pendientesTotal = $pendientesClas + $pendientesDet;
+            $pdo = \App\Services\SqliteConnection::get();
+            $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+            $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
 
             $rutaRel = $record['ruta_relativa'] ?? $key;
             $logMsg = 'Procesada: ' . $rutaRel . ' · resultado: ' . ($resultado ?? '');
@@ -388,6 +398,7 @@ class ImagenesController extends BaseController
                 'pendientes_deteccion' => $pendientesDet,
                 // Compat/debug: suma de pendientes
                 'pendientes_total' => $pendientesTotal,
+                'detections_total' => $detectionsTotal,
                 'stats' => $stats,
                 'stats_deteccion' => $statsDet
             ]);
