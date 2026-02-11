@@ -1994,8 +1994,21 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
 /* ========== Página Workspaces — UI rediseñada ========== */
-.page-workspaces .main { padding-top: 1.25rem; padding-left: 1rem; padding-right: 1rem; }
-.page-workspaces .ws-container { max-width: none; width: 100%; padding-left: 0; padding-right: 0; }
+/* Workspaces: contenido ocupa todo el alto, sin hueco inferior */
+.page-workspaces .main { padding-top: 1.25rem; padding-left: 1rem; padding-right: 1rem; padding-bottom: 0; flex: 1 1 0; min-height: 0; max-height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-container { max-width: none; width: 100%; padding-left: 0; padding-right: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-layout { flex: 1 1 0; min-height: 0; align-items: stretch; overflow: hidden; display: flex; }
+.page-workspaces .ws-grid-wrap { flex: 1 1 0; min-height: 0; overflow-y: scroll; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding-bottom: 4rem; }
+.page-workspaces .ws-search-col { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: hidden; }
+.page-workspaces .ws-search-consolidado { flex: 1; min-height: 0; max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado .buscador-acordeon.ws-search-acordeon { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-carpetas .acordeon-item[data-acordeon="carpetas"] .acordeon-body,
+.page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-etiquetas .acordeon-item[data-acordeon="etiquetas"] .acordeon-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado .buscador-acordeon .acordeon-item[data-acordeon="etiquetas"],
+.page-workspaces .ws-search-consolidado .buscador-acordeon .acordeon-item[data-acordeon="carpetas"] { min-height: 0; }
+.page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-etiquetas .acordeon-item[data-acordeon="etiquetas"] .acordeon-body-inner { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado .buscador-tags-wrap { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding-bottom: 0.5rem; }
+.page-workspaces .ws-search-consolidado .buscador-results-wrap { flex: 1 1 0; min-height: 0; }
 
 .ws-header {
   margin-bottom: 1.75rem;
@@ -2015,6 +2028,77 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
   color: var(--text-muted);
   line-height: 1.45;
   max-width: 36rem;
+}
+
+/* Layout: columna buscador usa todo el alto disponible (sticky desactivado para permitir flex) */
+
+/* Buscador consolidado (columna derecha) */
+.page-workspaces .ws-search-consolidado {
+  margin-bottom: 0;
+  padding: 1rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.page-workspaces .ws-search-consolidado-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem 0;
+  color: var(--text);
+}
+.page-workspaces .ws-search-consolidado-title i { margin-right: 0.35rem; }
+.page-workspaces .ws-search-acordeon.buscador-acordeon {
+  min-height: 0;
+}
+.page-workspaces .ws-search-acordeon .acordeon-item {
+  min-height: 0;
+}
+.page-workspaces .ws-search-acordeon .acordeon-header {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+.page-workspaces .ws-search-acordeon .acordeon-body {
+  padding: 0.75rem;
+}
+.page-workspaces .ws-search-acordeon .buscador-results-wrap {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.page-workspaces .ws-search-acordeon .buscador-results-wrap .list-group-flex {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 1.5rem;
+}
+.page-workspaces .ws-search-result-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+}
+.page-workspaces .ws-search-acordeon .tag-etiqueta-btn.active {
+  font-weight: 600;
+}
+/* Tags de etiquetas: 3 por fila en workspace */
+.page-workspaces .ws-search-acordeon .buscador-tags-wrap .tags-etiquetas,
+.page-workspaces #tagsEtiquetasGlobal {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem 0.5rem;
+  align-content: start;
+}
+.page-workspaces .ws-search-acordeon .buscador-tags-wrap .tag-etiqueta-btn,
+.page-workspaces #tagsEtiquetasGlobal .tag-etiqueta-btn {
+  margin: 0;
+  min-width: 0;
 }
 
 /* Empty state */
@@ -2044,12 +2128,19 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
   line-height: 1.5;
 }
 
-/* Grid de tarjetas — contenedores grandes */
+/* Grid de tarjetas — 3 por fila, contenedor con scroll si hace falta */
 .ws-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 1.5rem;
   width: 100%;
+  padding-bottom: 0.5rem;
+}
+@media (max-width: 1200px) {
+  .ws-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 576px) {
+  .ws-grid { grid-template-columns: 1fr; }
 }
 
 .ws-card {

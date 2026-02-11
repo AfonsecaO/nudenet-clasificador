@@ -29,6 +29,21 @@ return [
         'method' => 'delete',
         'type' => 'api'
     ],
+    'buscar_carpetas_global' => [
+        'controller' => 'WorkspaceController',
+        'method' => 'buscarCarpetasConsolidado',
+        'type' => 'api'
+    ],
+    'etiquetas_detectadas_global' => [
+        'controller' => 'WorkspaceController',
+        'method' => 'etiquetasDetectadasConsolidado',
+        'type' => 'api'
+    ],
+    'buscar_imagenes_etiquetas_global' => [
+        'controller' => 'WorkspaceController',
+        'method' => 'buscarImagenesEtiquetasConsolidado',
+        'type' => 'api'
+    ],
 
     // API Routes
     'obtener_tablas' => [
