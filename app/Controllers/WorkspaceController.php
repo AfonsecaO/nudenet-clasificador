@@ -246,18 +246,74 @@ class WorkspaceController extends BaseController
                         $stmt->execute();
                         $rows = $stmt->fetchAll() ?: [];
                     }
+                    $rutas = array_column($rows, 'ruta');
+                    $rutas = array_values(array_unique(array_filter($rutas, fn($v) => $v !== '')));
+                    $pendByRuta = [];
+                    $tagsByRuta = [];
+                    if ($rows && !empty($rutas) && $this->hasTable($pdo, 'images')) {
+                        $ph = implode(',', array_fill(0, count($rutas), '?'));
+                        $stmtPend = $pdo->prepare("
+                            SELECT i.ruta_carpeta as ruta, COUNT(*) as c
+                            FROM images i
+                            WHERE i.ruta_carpeta IN ($ph)
+                              AND (COALESCE(i.detect_estado,'') <> 'ok' OR COALESCE(i.clasif_estado,'') = 'pending')
+                            GROUP BY i.ruta_carpeta
+                        ");
+                        $stmtPend->execute($rutas);
+                        foreach ($stmtPend->fetchAll() ?: [] as $row) {
+                            $rutaP = (string)($row['ruta'] ?? '');
+                            if ($rutaP !== '') $pendByRuta[$rutaP] = (int)($row['c'] ?? 0);
+                        }
+                        if ($this->hasTable($pdo, 'detections')) {
+                            $stmtTags = $pdo->prepare("
+                                SELECT i.ruta_carpeta as ruta, d.label as label, COUNT(DISTINCT i.ruta_relativa) as c
+                                FROM images i
+                                JOIN detections d ON d.image_ruta_relativa = i.ruta_relativa
+                                WHERE COALESCE(i.ruta_carpeta,'') IN ($ph)
+                                GROUP BY i.ruta_carpeta, d.label
+                            ");
+                            $stmtTags->execute($rutas);
+                            foreach ($stmtTags->fetchAll() ?: [] as $row) {
+                                $rutaP = (string)($row['ruta'] ?? '');
+                                $lab = isset($row['label']) ? strtoupper(trim((string)$row['label'])) : '';
+                                $cnt = (int)($row['c'] ?? 0);
+                                if ($rutaP !== '' && $lab !== '' && $cnt > 0) {
+                                    if (!isset($tagsByRuta[$rutaP])) $tagsByRuta[$rutaP] = [];
+                                    $tagsByRuta[$rutaP][$lab] = ($tagsByRuta[$rutaP][$lab] ?? 0) + $cnt;
+                                }
+                            }
+                        }
+                    }
+                    $batch = [];
                     foreach ($rows as $r) {
                         $ruta = (string)($r['ruta'] ?? '');
                         $nombre = (string)($r['nombre'] ?? '');
                         if ($nombre === '' && $ruta !== '') {
                             $nombre = $this->nombreDesdeRuta($ruta);
                         }
-                        $carpetas[] = [
+                        $tagsMap = $tagsByRuta[$ruta] ?? [];
+                        $tagsList = [];
+                        foreach ($tagsMap as $lab => $cnt) {
+                            $tagsList[] = ['label' => $lab, 'count' => (int)$cnt];
+                        }
+                        usort($tagsList, fn($a, $b) => ($b['count'] <=> $a['count']) ?: strcmp((string)($a['label'] ?? ''), (string)($b['label'] ?? '')));
+                        $tagsList = array_slice($tagsList, 0, 12);
+                        $batch[] = [
                             'nombre' => $nombre !== '' ? $nombre : $ruta,
                             'ruta' => $ruta,
                             'total_archivos' => (int)($r['total_imagenes'] ?? 0),
+                            'pendientes' => (int)($pendByRuta[$ruta] ?? 0),
                             'workspace' => $slug,
+                            'tags' => $tagsList,
                         ];
+                    }
+                    try {
+                        $batch = (new CarpetasController())->enriquecerCarpetasConAvataresParaWorkspace((string)$slug, $batch, $pdo);
+                    } catch (\Throwable $e) {
+                        // mantener batch sin avatares
+                    }
+                    foreach ($batch as $item) {
+                        $carpetas[] = $item;
                     }
                 } catch (\Throwable $e) {
                     // omitir workspace
