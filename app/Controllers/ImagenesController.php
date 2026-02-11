@@ -197,7 +197,7 @@ class ImagenesController extends BaseController
                 ]);
             }
 
-            $baseUrl = \App\Services\ConfigService::obtenerOpcional('CLASIFICADOR_BASE_URL', 'http://localhost:8001');
+            $baseUrl = \App\Services\ConfigService::obtenerOpcional('CLASIFICADOR_BASE_URL', 'http://localhost:8001/');
             $baseUrl = rtrim(trim($baseUrl), '/');
             $urlDetect = $baseUrl . '/detect';
 
