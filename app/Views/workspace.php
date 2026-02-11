@@ -30,11 +30,6 @@ function fmtTs($ts): string {
 
 <main class="main content page-workspaces">
   <div class="container ws-container">
-    <header class="ws-header">
-      <h1 class="ws-header-title">Workspaces</h1>
-      <p class="ws-header-desc">Ambientes aislados. Descargar o Clasificar para procesar varios a la vez aquí.</p>
-    </header>
-
     <?php if (!empty($workspaces)): ?>
     <div id="workspaceProcessingPanel" class="ws-processing" style="display: none;">
       <div class="ws-processing-bar">
@@ -55,6 +50,8 @@ function fmtTs($ts): string {
         </button>
       </div>
     <?php else: ?>
+    <div class="row ws-layout">
+      <div class="col-lg-8 col-md-12 ws-grid-wrap">
     <div class="ws-grid">
       <?php foreach ($workspaces as $ws): ?>
         <?php
@@ -119,6 +116,24 @@ function fmtTs($ts): string {
         </article>
       <?php endforeach; ?>
     </div>
+      </div>
+      <div class="col-lg-4 col-md-12 ws-search-col mb-3 mb-lg-0">
+        <div class="ws-search-consolidado" id="wsSearchConsolidado">
+          <h2 class="ws-search-consolidado-title"><i class="fas fa-search"></i> Buscar en todos los workspaces</h2>
+          <?php
+          $buscador = [
+            'suffix' => 'Global',
+            'acordeonId' => 'wsSearchAcordeon',
+            'acordeonClass' => 'buscador-acordeon ws-search-acordeon expanded-carpetas',
+            'idLstResultadosEtiq' => 'lstEtiquetasGlobal',
+            'idTagsEtiquetasEmpty' => 'tagsEtiquetasGlobalEmpty',
+            'emptyTagsText' => 'Cargando etiquetas…',
+          ];
+          include __DIR__ . '/partials/buscador-acordeon.php';
+          ?>
+        </div>
+      </div>
+    </div>
     <?php endif; ?>
   </div>
 </main>
@@ -181,6 +196,79 @@ function fmtTs($ts): string {
   </div>
 </div>
 
+<?php if (!empty($workspaces)): ?>
+<!-- Modales para buscador consolidado (carpeta y visor) -->
+<div class="modal fade" id="modalCarpeta" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-folder-open"></i> <span id="ttlCarpeta">Carpeta</span></h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body modal-carpeta-body">
+        <div class="modal-carpeta-tags-wrap">
+          <div class="d-flex flex-wrap" id="tagsCarpeta"></div>
+        </div>
+        <div class="row mt-3" id="gridThumbs"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal fade" id="modalCarpetaStacked" tabindex="-1" role="dialog" aria-hidden="true" data-backdrop="true" data-keyboard="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-folder-open"></i> <span id="ttlCarpetaStacked">Carpeta</span></h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body modal-carpeta-body">
+        <div class="row mt-2" id="gridThumbsStacked"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal fade" id="modalVisor" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable modal-visor-dialog" role="document">
+    <div class="modal-content modal-visor-content">
+      <div class="modal-header modal-visor-header">
+        <h5 class="modal-title modal-visor-title" title="" id="ttlImagenWrap">
+          <i class="fas fa-image modal-visor-title-icon" aria-hidden="true"></i>
+          <span id="ttlImagen" class="modal-visor-filename">Imagen</span>
+        </h5>
+        <button type="button" class="close modal-visor-close" data-dismiss="modal" aria-label="Cerrar"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body modal-visor-body">
+        <div class="visor-toolbar" role="toolbar" aria-label="Acciones de la imagen">
+          <div class="visor-toolbar-left">
+            <div class="custom-control custom-switch">
+              <input type="checkbox" class="custom-control-input" id="swBoxes" checked>
+              <label class="custom-control-label" for="swBoxes">Bounding boxes</label>
+            </div>
+          </div>
+          <span class="visor-toolbar-divider" aria-hidden="true"></span>
+          <div class="visor-toolbar-buttons">
+            <button type="button" class="btn btn-sm visor-btn visor-btn-folder" id="btnVisorAbrirCarpeta" title="Ir a la carpeta que contiene esta imagen" aria-label="Ir a carpeta">
+              <i class="fas fa-folder-open" aria-hidden="true"></i>
+              <span>Ir a carpeta</span>
+            </button>
+            <a class="btn btn-sm visor-btn visor-btn-original" id="lnkAbrirOriginal" href="#" target="_blank" rel="noopener" title="Abrir imagen original en nueva pestaña">
+              <i class="fas fa-external-link-alt" aria-hidden="true"></i>
+              <span>Abrir original</span>
+            </a>
+          </div>
+          <span class="visor-toolbar-divider visor-toolbar-divider-badges" aria-hidden="true"></span>
+          <div class="visor-badges-wrap" id="badgesDet" aria-label="Detecciones"></div>
+        </div>
+        <div class="visor-canvas-wrap" id="visorCanvasWrap">
+          <canvas id="cnv"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
+<script src="js/buscador-modals.js"></script>
 <script>
   const wsCreateName = document.getElementById('wsCreateName');
   const btnCreate = document.getElementById('btnCreate');
@@ -547,6 +635,295 @@ function fmtTs($ts): string {
         btnCreate.disabled = false;
       }
     });
+  }
+
+  // --- Buscador consolidado (todos los workspaces) ---
+  const wsSearchConsolidado = document.getElementById('wsSearchConsolidado');
+  if (wsSearchConsolidado) {
+    const txtBuscarCarpetaGlobal = document.getElementById('txtBuscarCarpetaGlobal');
+    const btnBuscarCarpetaGlobal = document.getElementById('btnBuscarCarpetaGlobal');
+    const stBuscarCarpetaGlobal = document.getElementById('stBuscarCarpetaGlobal');
+    const lstCarpetasGlobal = document.getElementById('lstCarpetasGlobal');
+    const rngUmbralGlobal = document.getElementById('rngUmbralGlobal');
+    const lblUmbralGlobal = document.getElementById('lblUmbralGlobal');
+    const tagsEtiquetasGlobal = document.getElementById('tagsEtiquetasGlobal');
+    const tagsEtiquetasGlobalEmpty = document.getElementById('tagsEtiquetasGlobalEmpty');
+    const stBuscarEtiquetasGlobal = document.getElementById('stBuscarEtiquetasGlobal');
+    const lstEtiquetasGlobal = document.getElementById('lstEtiquetasGlobal');
+    const wrapBtnAbrirResultadosGlobal = document.getElementById('wrapBtnAbrirResultadosGlobal');
+    const txtCountResultadosEtiqGlobal = document.getElementById('txtCountResultadosEtiqGlobal');
+    const btnAbrirResultadosEnModalGlobal = document.getElementById('btnAbrirResultadosEnModalGlobal');
+    const wsSearchAcordeon = document.getElementById('wsSearchAcordeon');
+
+    const MIN_CARACTERES_CARPETA = 3;
+    let selectedEtiquetaGlobal = null;
+    let buscarCarpetaGlobalTimer = null;
+    let buscarEtiquetasGlobalTimer = null;
+    let lastEtiquetasGlobalResultados = [];
+
+    if (typeof window.BuscadorModals !== 'undefined') {
+      const modalCarpeta = document.getElementById('modalCarpeta');
+      if (modalCarpeta) {
+        window.BuscadorModals.init({
+          getJson: async function (url) {
+            const resp = await fetch(url, { headers: { accept: 'application/json' } });
+            const data = await resp.json().catch(function () { return {}; });
+            return { ok: resp.ok, data: data };
+          },
+          buildUrlWithWorkspace: function (url, ws) {
+            if (!ws) return url;
+            var sep = url.indexOf('?') >= 0 ? '&' : '?';
+            return url + sep + 'workspace=' + encodeURIComponent(ws);
+          },
+          setStatus: setStatus,
+          refs: {
+            modalCarpeta: modalCarpeta,
+            ttlCarpeta: document.getElementById('ttlCarpeta'),
+            tagsCarpeta: document.getElementById('tagsCarpeta'),
+            gridThumbs: document.getElementById('gridThumbs'),
+            modalCarpetaStacked: document.getElementById('modalCarpetaStacked'),
+            ttlCarpetaStacked: document.getElementById('ttlCarpetaStacked'),
+            gridThumbsStacked: document.getElementById('gridThumbsStacked'),
+            modalVisor: document.getElementById('modalVisor'),
+            ttlImagen: document.getElementById('ttlImagen'),
+            ttlImagenWrap: document.getElementById('ttlImagenWrap'),
+            lnkAbrirOriginal: document.getElementById('lnkAbrirOriginal'),
+            btnVisorAbrirCarpeta: document.getElementById('btnVisorAbrirCarpeta'),
+            swBoxes: document.getElementById('swBoxes'),
+            badgesDet: document.getElementById('badgesDet'),
+            cnv: document.getElementById('cnv'),
+            stVisor: document.getElementById('stVisor'),
+          },
+        });
+      }
+    }
+
+    function expandirBuscadorGlobal(quien) {
+      if (!wsSearchAcordeon) return;
+      wsSearchAcordeon.classList.remove('expanded-carpetas', 'expanded-etiquetas');
+      if (quien === 'carpetas') wsSearchAcordeon.classList.add('expanded-carpetas');
+      else if (quien === 'etiquetas') wsSearchAcordeon.classList.add('expanded-etiquetas');
+    }
+
+    // Buscar por carpeta
+    async function buscarCarpetasGlobal(bypassMinLength) {
+      const q = String(txtBuscarCarpetaGlobal?.value || '').trim();
+      if (!bypassMinLength && q.length > 0 && q.length < MIN_CARACTERES_CARPETA) {
+        setStatus(stBuscarCarpetaGlobal, 'neutral', 'Mín. ' + MIN_CARACTERES_CARPETA + ' caracteres o pulsa Buscar');
+        return;
+      }
+      expandirBuscadorGlobal('carpetas');
+      setStatus(stBuscarCarpetaGlobal, 'neutral', q ? 'Buscando…' : 'Cargando carpetas…');
+      if (lstCarpetasGlobal) lstCarpetasGlobal.innerHTML = '<div class="text-muted py-2 text-center small"><i class="fas fa-spinner fa-spin mr-1"></i> Consultando…</div>';
+      const { ok, data } = await getJson(apiUrl('buscar_carpetas_global', { q: q }));
+      if (!ok || !data?.success) {
+        setStatus(stBuscarCarpetaGlobal, 'bad', String(data?.error || 'Error'));
+        if (lstCarpetasGlobal) lstCarpetasGlobal.innerHTML = '<div class="buscador-empty">Error</div>';
+        return;
+      }
+      setStatus(stBuscarCarpetaGlobal, 'ok', 'Total: ' + (data.total || 0));
+      const carpetas = Array.isArray(data.carpetas) ? data.carpetas : [];
+      if (!lstCarpetasGlobal) return;
+      lstCarpetasGlobal.innerHTML = '';
+      if (!carpetas.length) {
+        lstCarpetasGlobal.innerHTML = '<div class="buscador-empty">Sin resultados</div>';
+        return;
+      }
+      for (const c of carpetas) {
+        const nombre = String(c?.nombre || c?.ruta || '').trim();
+        const ruta = String(c?.ruta || '').trim();
+        const total = Number(c?.total_archivos ?? 0);
+        const ws = String(c?.workspace || '').trim();
+        const a = document.createElement('a');
+        a.href = '#';
+        a.className = 'list-group-item list-group-item-action ws-search-result-item';
+        a.innerHTML = '<span class="badge badge-secondary mr-2">' + ws.replace(/</g, '&lt;') + '</span>' +
+          (nombre.replace(/</g, '&lt;')) + (ruta && ruta !== nombre ? ' <span class="text-muted small">' + ruta.replace(/</g, '&lt;') + '</span>' : '') +
+          ' <span class="badge badge-light ml-1">' + total.toLocaleString() + ' imágenes</span>';
+        a.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try {
+            if (window.BuscadorModals) await window.BuscadorModals.openFolder(nombre, ruta, null, ws);
+            else { const { ok, data } = await postJson('workspace_set', { workspace: ws }); if (ok && data.success) window.location.href = '?action=index'; }
+          } catch (err) { setStatus(stBuscarCarpetaGlobal, 'bad', err?.message || 'Error'); }
+        });
+        lstCarpetasGlobal.appendChild(a);
+      }
+    }
+
+    if (txtBuscarCarpetaGlobal) {
+      txtBuscarCarpetaGlobal.addEventListener('input', function () {
+        if (buscarCarpetaGlobalTimer) clearTimeout(buscarCarpetaGlobalTimer);
+        var q = String(txtBuscarCarpetaGlobal.value || '').trim();
+        if (q.length >= MIN_CARACTERES_CARPETA) {
+          buscarCarpetaGlobalTimer = setTimeout(function () { buscarCarpetasGlobal(false); buscarCarpetaGlobalTimer = null; }, 450);
+        } else {
+          buscarCarpetaGlobalTimer = null;
+          if (lstCarpetasGlobal) lstCarpetasGlobal.innerHTML = '';
+        }
+      });
+      txtBuscarCarpetaGlobal.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (buscarCarpetaGlobalTimer) clearTimeout(buscarCarpetaGlobalTimer);
+          buscarCarpetaGlobalTimer = null;
+          if (String(txtBuscarCarpetaGlobal?.value || '').trim().length >= MIN_CARACTERES_CARPETA) buscarCarpetasGlobal(false);
+        }
+      });
+    }
+    if (btnBuscarCarpetaGlobal) btnBuscarCarpetaGlobal.addEventListener('click', () => buscarCarpetasGlobal(true));
+
+    // Buscar por etiquetas (misma validación por umbral que el buscador del index)
+    let allEtiquetasGlobal = []; // { label, count, min, max } desde etiquetas_detectadas_global
+
+    function tagLabelToFullText(label) {
+      return String(label || '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+
+    /** Un tag se muestra si el umbral (0–100) está dentro del rango del tag: umbral <= max. */
+    function etiquetaIncluyeUmbralGlobal(t, umbral) {
+      const max = t.max != null ? Number(t.max) : 100;
+      return umbral <= max;
+    }
+
+    function renderTagsFilteredGlobal(umbral) {
+      if (!tagsEtiquetasGlobal || !tagsEtiquetasGlobalEmpty) return;
+      const umbralNum = Number(umbral);
+      const filtered = umbralNum === 0 ? allEtiquetasGlobal : allEtiquetasGlobal.filter(function (t) { return etiquetaIncluyeUmbralGlobal(t, umbralNum); });
+      if (selectedEtiquetaGlobal && !filtered.some(function (t) { return String(t.label).trim() === selectedEtiquetaGlobal; })) {
+        selectedEtiquetaGlobal = '';
+        if (lstEtiquetasGlobal) lstEtiquetasGlobal.innerHTML = '<div class="buscador-empty">Ajusta el umbral o elige otra etiqueta</div>';
+        setStatus(stBuscarEtiquetasGlobal, 'neutral', 'Ajusta el umbral o elige otra etiqueta');
+      }
+      tagsEtiquetasGlobal.innerHTML = '';
+      tagsEtiquetasGlobalEmpty.style.display = filtered.length ? 'none' : 'block';
+      tagsEtiquetasGlobalEmpty.textContent = (allEtiquetasGlobal.length && !filtered.length) ? 'Ninguna etiqueta cumple el umbral' : 'Cargando etiquetas…';
+      for (let i = 0; i < filtered.length; i++) {
+        const e = filtered[i];
+        const label = String(e?.label || '').trim();
+        if (!label) continue;
+        const count = (e && e.count != null) ? Number(e.count) : null;
+        const min = e.min != null ? Number(e.min) : null;
+        const max = e.max != null ? Number(e.max) : null;
+        const displayLabel = tagLabelToFullText(label);
+        const rangeStr = (min != null && max != null && !Number.isNaN(min) && !Number.isNaN(max)) ? ' [' + min + '–' + max + '%]' : '';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-sm btn-outline-secondary tag-etiqueta-btn' + (selectedEtiquetaGlobal === label ? ' active' : '');
+        btn.dataset.label = label;
+        const mainText = count != null && !Number.isNaN(count) ? displayLabel + ' (' + count.toLocaleString() + ')' : displayLabel;
+        btn.textContent = mainText + rangeStr;
+        btn.addEventListener('click', function () {
+          const yaSeleccionado = selectedEtiquetaGlobal === label;
+          if (yaSeleccionado) {
+            selectedEtiquetaGlobal = '';
+            document.querySelectorAll('#tagsEtiquetasGlobal .tag-etiqueta-btn').forEach(function (b) { b.classList.remove('active'); });
+            if (lstEtiquetasGlobal) lstEtiquetasGlobal.innerHTML = '<div class="buscador-empty">Sin resultados</div>';
+            setStatus(stBuscarEtiquetasGlobal, 'neutral', 'Selecciona una etiqueta (clic en un tag)');
+            return;
+          }
+          selectedEtiquetaGlobal = label;
+          document.querySelectorAll('#tagsEtiquetasGlobal .tag-etiqueta-btn').forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          if (buscarEtiquetasGlobalTimer) clearTimeout(buscarEtiquetasGlobalTimer);
+          buscarEtiquetasGlobalTimer = setTimeout(function () { buscarEtiquetasGlobal(); buscarEtiquetasGlobalTimer = null; }, 450);
+        });
+        tagsEtiquetasGlobal.appendChild(btn);
+      }
+    }
+
+    function getUmbralGlobal() {
+      const v = parseInt(rngUmbralGlobal?.value || '80', 10);
+      return Math.max(0, Math.min(100, isNaN(v) ? 80 : v));
+    }
+    function syncUmbralGlobal() {
+      if (!lblUmbralGlobal) return;
+      const val = String(rngUmbralGlobal?.value ?? '80');
+      lblUmbralGlobal.textContent = val + '%';
+      lblUmbralGlobal.style.setProperty('--umbral-pct', val + '%');
+      renderTagsFilteredGlobal(getUmbralGlobal());
+    }
+    if (rngUmbralGlobal && lblUmbralGlobal) {
+      syncUmbralGlobal();
+      rngUmbralGlobal.addEventListener('input', syncUmbralGlobal);
+    }
+
+    async function loadEtiquetasGlobal() {
+      if (!tagsEtiquetasGlobal || !tagsEtiquetasGlobalEmpty) return;
+      tagsEtiquetasGlobal.innerHTML = '';
+      tagsEtiquetasGlobalEmpty.style.display = 'block';
+      const { ok, data } = await getJson('?action=etiquetas_detectadas_global');
+      tagsEtiquetasGlobalEmpty.style.display = 'none';
+      if (!ok || !data?.success) return;
+      allEtiquetasGlobal = Array.isArray(data.etiquetas) ? data.etiquetas : [];
+      renderTagsFilteredGlobal(getUmbralGlobal());
+    }
+
+    async function buscarEtiquetasGlobal() {
+      const label = selectedEtiquetaGlobal ? String(selectedEtiquetaGlobal).trim() : '';
+      if (!label) {
+        setStatus(stBuscarEtiquetasGlobal, 'bad', 'Selecciona una etiqueta (clic en un tag)');
+        return;
+      }
+      expandirBuscadorGlobal('etiquetas');
+      setStatus(stBuscarEtiquetasGlobal, 'neutral', 'Buscando…');
+      if (lstEtiquetasGlobal) lstEtiquetasGlobal.innerHTML = '<div class="text-muted py-2 text-center small"><i class="fas fa-spinner fa-spin mr-1"></i> Consultando…</div>';
+      const umbral = getUmbralGlobal();
+      const { ok, data } = await getJson(apiUrl('buscar_imagenes_etiquetas_global', { labels: label, umbral: umbral }));
+      if (!ok || !data?.success) {
+        setStatus(stBuscarEtiquetasGlobal, 'bad', String(data?.error || 'Error'));
+        lastEtiquetasGlobalResultados = [];
+        if (wrapBtnAbrirResultadosGlobal) wrapBtnAbrirResultadosGlobal.style.display = 'none';
+        if (lstEtiquetasGlobal) lstEtiquetasGlobal.innerHTML = '<div class="buscador-empty">Error</div>';
+        return;
+      }
+      setStatus(stBuscarEtiquetasGlobal, 'ok', 'Resultados: ' + (data.total || 0));
+      const imagenes = Array.isArray(data.imagenes) ? data.imagenes : [];
+      lastEtiquetasGlobalResultados = imagenes;
+      if (wrapBtnAbrirResultadosGlobal) wrapBtnAbrirResultadosGlobal.style.display = imagenes.length ? 'flex' : 'none';
+      if (txtCountResultadosEtiqGlobal && imagenes.length) txtCountResultadosEtiqGlobal.textContent = imagenes.length + ' imagen' + (imagenes.length !== 1 ? 'es' : '') + ' en esta búsqueda';
+      if (!lstEtiquetasGlobal) return;
+      lstEtiquetasGlobal.innerHTML = '';
+      if (!imagenes.length) {
+        lstEtiquetasGlobal.innerHTML = '<div class="buscador-empty">Sin resultados</div>';
+        return;
+      }
+      for (const it of imagenes) {
+        const ruta = String(it?.ruta_relativa || it?.ruta || '').trim();
+        const carpeta = String(it?.ruta_carpeta || '').trim();
+        const archivo = String(it?.archivo || '').trim();
+        const bestScore = (it?.best_score !== undefined && it?.best_score !== null) ? Number(it.best_score) : null;
+        const ws = String(it?.workspace || '').trim();
+        const scorePct = bestScore !== null && !Number.isNaN(bestScore) ? Math.round(bestScore * 100) : null;
+        const a = document.createElement('a');
+        a.href = '#';
+        a.className = 'list-group-item list-group-item-action ws-search-result-item';
+        a.innerHTML = '<span class="badge badge-secondary mr-2">' + ws.replace(/</g, '&lt;') + '</span>' +
+          (ruta.replace(/</g, '&lt;')) +
+          (scorePct !== null ? ' <span class="badge badge-pill ml-1">' + scorePct + '%</span>' : '');
+        a.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try {
+            if (window.BuscadorModals && archivo) await window.BuscadorModals.openVisor(carpeta, archivo, ruta, ws);
+            else if (window.BuscadorModals) await window.BuscadorModals.openFolder(carpeta, carpeta, ruta, ws);
+            else { const { ok, data } = await postJson('workspace_set', { workspace: ws }); if (ok && data.success) window.location.href = '?action=index'; }
+          } catch (err) { setStatus(stBuscarEtiquetasGlobal, 'bad', err?.message || 'Error'); }
+        });
+        lstEtiquetasGlobal.appendChild(a);
+      }
+    }
+
+    if (btnAbrirResultadosEnModalGlobal) btnAbrirResultadosEnModalGlobal.addEventListener('click', function () {
+      if (window.BuscadorModals && lastEtiquetasGlobalResultados.length) window.BuscadorModals.openGalleryResultados(lastEtiquetasGlobalResultados);
+    });
+
+    document.querySelectorAll('#wsSearchAcordeon .acordeon-item').forEach((item) => {
+      const header = item.querySelector('.acordeon-header');
+      const quien = item.getAttribute('data-acordeon');
+      if (header && quien) header.addEventListener('click', () => expandirBuscadorGlobal(quien));
+    });
+
+    loadEtiquetasGlobal();
   }
 </script>
 

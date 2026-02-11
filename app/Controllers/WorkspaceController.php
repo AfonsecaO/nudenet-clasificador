@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Services\StringNormalizer;
 use App\Services\WorkspaceService;
 use PDO;
 
@@ -174,6 +175,290 @@ class WorkspaceController extends BaseController
         }
 
         return $out;
+    }
+
+    /**
+     * Abre PDO para un workspace por path. Devuelve null si no hay DB o falla.
+     */
+    private function pdoForSlug(string $slug): ?PDO
+    {
+        $paths = WorkspaceService::paths($slug);
+        $dbPath = $paths['dbPath'] ?? '';
+        if ($dbPath === '' || !is_file($dbPath)) {
+            return null;
+        }
+        try {
+            $pdo = new PDO('sqlite:' . $dbPath);
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+            $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+            return $pdo;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function hasTable(PDO $pdo, string $table): bool
+    {
+        $st = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:t LIMIT 1");
+        $st->execute([':t' => $table]);
+        return (bool)$st->fetchColumn();
+    }
+
+    private function nombreDesdeRuta(string $ruta): string
+    {
+        $ruta = str_replace('\\', '/', $ruta);
+        $ruta = trim($ruta, '/');
+        if ($ruta === '') return '';
+        return basename($ruta);
+    }
+
+    private const LIMIT_CARPETAS_POR_WS = 100;
+    private const LIMIT_IMAGENES_POR_WS = 5000;
+    private const LIMIT_IMAGENES_GLOBAL = 10000;
+
+    public function buscarCarpetasConsolidado()
+    {
+        try {
+            $q = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
+            $slugs = WorkspaceService::listWorkspaces();
+            $carpetas = [];
+            $searchKey = $q !== '' ? StringNormalizer::toSearchKey($q) : '';
+
+            foreach ($slugs as $slug) {
+                $pdo = $this->pdoForSlug((string)$slug);
+                if ($pdo === null || !$this->hasTable($pdo, 'folders')) {
+                    continue;
+                }
+                try {
+                    if ($searchKey === '') {
+                        $rows = $pdo->query('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM folders ORDER BY ruta_carpeta ASC LIMIT ' . self::LIMIT_CARPETAS_POR_WS)->fetchAll();
+                    } else {
+                        $stmt = $pdo->prepare("
+                            SELECT ruta_carpeta as ruta, nombre, total_imagenes
+                            FROM folders
+                            WHERE COALESCE(search_key, '') LIKE :q
+                            ORDER BY total_imagenes DESC, ruta_carpeta ASC
+                            LIMIT :lim
+                        ");
+                        $stmt->bindValue(':q', '%' . $searchKey . '%', PDO::PARAM_STR);
+                        $stmt->bindValue(':lim', self::LIMIT_CARPETAS_POR_WS, PDO::PARAM_INT);
+                        $stmt->execute();
+                        $rows = $stmt->fetchAll() ?: [];
+                    }
+                    foreach ($rows as $r) {
+                        $ruta = (string)($r['ruta'] ?? '');
+                        $nombre = (string)($r['nombre'] ?? '');
+                        if ($nombre === '' && $ruta !== '') {
+                            $nombre = $this->nombreDesdeRuta($ruta);
+                        }
+                        $carpetas[] = [
+                            'nombre' => $nombre !== '' ? $nombre : $ruta,
+                            'ruta' => $ruta,
+                            'total_archivos' => (int)($r['total_imagenes'] ?? 0),
+                            'workspace' => $slug,
+                        ];
+                    }
+                } catch (\Throwable $e) {
+                    // omitir workspace
+                }
+            }
+
+            $this->jsonResponse([
+                'success' => true,
+                'carpetas' => $carpetas,
+                'total' => count($carpetas),
+                'busqueda' => $q,
+            ]);
+        } catch (\Exception $e) {
+            $this->jsonResponse(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function etiquetasDetectadasConsolidado()
+    {
+        try {
+            $slugs = WorkspaceService::listWorkspaces();
+            $byLabel = [];
+
+            foreach ($slugs as $slug) {
+                $pdo = $this->pdoForSlug((string)$slug);
+                if ($pdo === null || !$this->hasTable($pdo, 'detections')) {
+                    continue;
+                }
+                try {
+                    $rows = $pdo->query("
+                        SELECT label,
+                               COUNT(DISTINCT image_ruta_relativa) as c,
+                               MIN(score) as min_score,
+                               MAX(score) as max_score
+                        FROM detections
+                        GROUP BY label
+                        ORDER BY c DESC, label ASC
+                    ")->fetchAll();
+                    foreach ($rows as $r) {
+                        $label = (string)($r['label'] ?? '');
+                        if ($label === '') continue;
+                        $c = (int)($r['c'] ?? 0);
+                        $minScore = isset($r['min_score']) ? (float)$r['min_score'] : 0;
+                        $maxScore = isset($r['max_score']) ? (float)$r['max_score'] : 0;
+                        if (!isset($byLabel[$label])) {
+                            $byLabel[$label] = ['label' => $label, 'count' => 0, 'min' => 100, 'max' => 0];
+                        }
+                        $byLabel[$label]['count'] += $c;
+                        $minPct = (int)round($minScore * 100);
+                        $maxPct = (int)round($maxScore * 100);
+                        if ($minPct < $byLabel[$label]['min']) $byLabel[$label]['min'] = $minPct;
+                        if ($maxPct > $byLabel[$label]['max']) $byLabel[$label]['max'] = $maxPct;
+                    }
+                } catch (\Throwable $e) {
+                    // omitir workspace
+                }
+            }
+
+            $etiquetas = array_values($byLabel);
+            usort($etiquetas, fn($a, $b) => ($b['count'] <=> $a['count']) ?: strcmp($a['label'], $b['label']));
+
+            $this->jsonResponse([
+                'success' => true,
+                'etiquetas' => $etiquetas,
+                'total' => count($etiquetas),
+            ]);
+        } catch (\Exception $e) {
+            $this->jsonResponse(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    private static function normalizarLabel(string $label): string
+    {
+        $label = trim($label);
+        if ($label === '') return '';
+        $label = strtoupper($label);
+        $label = preg_replace('/\s+/', '_', $label);
+        return $label;
+    }
+
+    public function buscarImagenesEtiquetasConsolidado()
+    {
+        try {
+            $labelsStr = $_GET['labels'] ?? '';
+            $umbral = isset($_GET['umbral']) ? (int)$_GET['umbral'] : 0;
+            $umbral = max(0, min(100, $umbral));
+            $umbralFloat = $umbral / 100.0;
+
+            $labelsStr = trim((string)$labelsStr);
+            $labels = [];
+            if ($labelsStr !== '') {
+                $labels = array_filter(array_map('trim', explode(',', $labelsStr)));
+            }
+
+            if (empty($labels)) {
+                $this->jsonResponse(['success' => false, 'error' => 'Parámetro labels requerido (csv)'], 400);
+                return;
+            }
+
+            $labelsNorm = [];
+            foreach ($labels as $lab) {
+                $lab = self::normalizarLabel((string)$lab);
+                if ($lab !== '') $labelsNorm[] = $lab;
+            }
+            $labelsNorm = array_values(array_unique($labelsNorm));
+            if (empty($labelsNorm)) {
+                $this->jsonResponse(['success' => true, 'labels' => $labels, 'umbral' => $umbral, 'total' => 0, 'imagenes' => []]);
+                return;
+            }
+
+            $slugs = WorkspaceService::listWorkspaces();
+            $allImagenes = [];
+            $placeholders = implode(',', array_fill(0, count($labelsNorm), '?'));
+            $labelCondition = "UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)";
+
+            foreach ($slugs as $slug) {
+                if (count($allImagenes) >= self::LIMIT_IMAGENES_GLOBAL) {
+                    break;
+                }
+                $pdo = $this->pdoForSlug((string)$slug);
+                if ($pdo === null || !$this->hasTable($pdo, 'detections') || !$this->hasTable($pdo, 'images')) {
+                    continue;
+                }
+                try {
+                    $stmtTop = $pdo->prepare("
+                        SELECT d.image_ruta_relativa, MAX(d.score) as best_score
+                        FROM detections d
+                        WHERE $labelCondition AND d.score >= ?
+                        GROUP BY d.image_ruta_relativa
+                        ORDER BY best_score DESC
+                        LIMIT " . self::LIMIT_IMAGENES_POR_WS . "
+                    ");
+                    $stmtTop->execute(array_merge($labelsNorm, [$umbralFloat]));
+                    $top = $stmtTop->fetchAll();
+                    if (empty($top)) continue;
+
+                    $imageKeys = array_map(fn($r) => (string)$r['image_ruta_relativa'], $top);
+                    $bestByKey = [];
+                    foreach ($top as $r) $bestByKey[(string)$r['image_ruta_relativa']] = (float)$r['best_score'];
+
+                    $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
+                    $stmtExists = $pdo->prepare("SELECT ruta_relativa FROM images WHERE ruta_relativa IN ($ph2)");
+                    $stmtExists->execute($imageKeys);
+                    $existingKeys = [];
+                    while ($row = $stmtExists->fetch(PDO::FETCH_NUM)) {
+                        $existingKeys[(string)$row[0]] = true;
+                    }
+                    $imageKeys = array_values(array_filter($imageKeys, fn($k) => !empty($existingKeys[$k])));
+                    if (empty($imageKeys)) continue;
+
+                    $stmtInfo = $pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM images WHERE ruta_relativa IN ($ph2)");
+                    $stmtInfo->execute($imageKeys);
+                    $infoRows = $stmtInfo->fetchAll();
+                    $infoByKey = [];
+                    foreach ($infoRows as $r) $infoByKey[(string)$r['ruta_relativa']] = $r;
+
+                    $stmtMatches = $pdo->prepare("
+                        SELECT d.image_ruta_relativa, d.label, MAX(d.score) as score
+                        FROM detections d
+                        WHERE d.image_ruta_relativa IN ($ph2)
+                          AND UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)
+                          AND d.score >= ?
+                        GROUP BY d.image_ruta_relativa, d.label
+                    ");
+                    $stmtMatches->execute(array_merge($imageKeys, $labelsNorm, [$umbralFloat]));
+                    $matchRows = $stmtMatches->fetchAll();
+                    $matchesByKey = [];
+                    foreach ($matchRows as $r) {
+                        $k = (string)$r['image_ruta_relativa'];
+                        $matchesByKey[$k][] = ['label' => (string)$r['label'], 'score' => (float)$r['score']];
+                    }
+
+                    foreach ($imageKeys as $k) {
+                        $info = $infoByKey[$k] ?? null;
+                        if (!$info) continue;
+                        $allImagenes[] = [
+                            'ruta_relativa' => $k,
+                            'ruta_carpeta' => (string)($info['ruta_carpeta'] ?? ''),
+                            'archivo' => (string)($info['archivo'] ?? ''),
+                            'best_score' => (float)($bestByKey[$k] ?? 0),
+                            'matches' => $matchesByKey[$k] ?? [],
+                            'workspace' => $slug,
+                        ];
+                    }
+                } catch (\Throwable $e) {
+                    // omitir workspace
+                }
+            }
+
+            usort($allImagenes, fn($a, $b) => ($b['best_score'] <=> $a['best_score']));
+
+            $this->jsonResponse([
+                'success' => true,
+                'labels' => $labels,
+                'umbral' => $umbral,
+                'total' => count($allImagenes),
+                'imagenes' => $allImagenes,
+            ]);
+        } catch (\Exception $e) {
+            $this->jsonResponse(['success' => false, 'error' => $e->getMessage()], 500);
+        }
     }
 }
 

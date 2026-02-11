@@ -134,59 +134,20 @@ function pct($n, $d): int {
         </div>
       </div>
 
-      <!-- Columna centro: Buscadores (ambos visibles; el que busca expande resultados automático) -->
+      <!-- Columna centro: Buscadores (componente compartido con workspace) -->
       <div class="col-lg-6 col-md-6 mb-3 col-buscadores">
         <div class="card card-buscadores">
-          <div class="buscador-acordeon expanded-carpetas" id="buscadorAcordeon">
-            <div class="acordeon-item" data-acordeon="carpetas">
-              <div class="acordeon-header">
-                <span><i class="fas fa-folder-open"></i> Buscar carpetas</span>
-              </div>
-              <div class="acordeon-body">
-                <div class="acordeon-body-inner">
-                  <div class="form-group mb-2">
-                    <div class="input-group">
-                      <input type="text" class="form-control" id="txtBuscarCarpeta" placeholder="Escribe para buscar (mín. 3 caracteres)" autocomplete="off">
-                      <div class="input-group-append">
-                        <button type="button" class="btn btn-outline-secondary btn-buscar-carpetas" id="btnBuscarCarpetas" title="Buscar bajo demanda (sin mínimo de caracteres)"><i class="fas fa-search"></i> Buscar</button>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="buscador-results-wrap">
-                    <div class="list-group list-group-flex" id="lstCarpetas"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="acordeon-item" data-acordeon="etiquetas">
-              <div class="acordeon-header">
-                <span><i class="fas fa-tags"></i> Buscar imágenes por etiqueta</span>
-              </div>
-              <div class="acordeon-body">
-                <div class="acordeon-body-inner buscador-etiquetas-inner">
-                  <div class="buscador-umbral-wrap">
-                    <div class="buscador-umbral-track-wrap">
-                      <input type="range" class="custom-range buscador-umbral-slider" id="rngUmbral" min="0" max="100" step="1" value="80" aria-label="Umbral">
-                      <span class="buscador-umbral-circle" id="lblUmbral" aria-hidden="true">80%</span>
-                    </div>
-                  </div>
-                  <div class="buscador-tags-wrap">
-                    <div id="tagsEtiquetas" class="tags-etiquetas d-flex flex-wrap"></div>
-                    <div id="tagsEtiquetasEmpty" class="tags-etiquetas-empty" style="display: none;"></div>
-                  </div>
-                  <div class="buscador-results-wrap">
-                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2 wrap-btn-abrir-resultados" id="wrapBtnAbrirResultados" style="display: none;">
-                      <span class="small text-muted" id="txtCountResultadosEtiq"></span>
-                      <button type="button" class="btn btn-sm btn-outline-primary" id="btnAbrirResultadosEnModal" title="Abrir el mismo modal de carpeta pero solo con estas imágenes">
-                        <i class="fas fa-th-large mr-1"></i> Abrir en galería
-                      </button>
-                    </div>
-                    <div class="list-group list-group-flex" id="lstResultadosEtiq"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <?php
+          $buscador = [
+            'suffix' => '',
+            'acordeonId' => 'buscadorAcordeon',
+            'acordeonClass' => 'buscador-acordeon expanded-carpetas',
+            'idLstResultadosEtiq' => 'lstResultadosEtiq',
+            'idTagsEtiquetasEmpty' => 'tagsEtiquetasEmpty',
+            'emptyTagsText' => '',
+          ];
+          include __DIR__ . '/partials/buscador-acordeon.php';
+          ?>
         </div>
       </div>
 
@@ -351,6 +312,7 @@ function pct($n, $d): int {
   </div>
 </div>
 
+<script src="js/buscador-modals.js"></script>
 <script>
   <?php if ($app_workspace_slug !== null && $app_workspace_slug !== ''): ?>window.APP_WORKSPACE = <?php echo json_encode($app_workspace_slug); ?>;<?php endif; ?>
   <?php if ($auto_param !== null && $auto_param !== ''): ?>window.APP_AUTO = <?php echo json_encode($auto_param); ?>;<?php endif; ?>
@@ -445,6 +407,7 @@ function pct($n, $d): int {
 
   const modalVisor = el('modalVisor');
   const ttlImagen = el('ttlImagen');
+  const ttlImagenWrap = el('ttlImagenWrap');
   const lnkAbrirOriginal = el('lnkAbrirOriginal');
   const btnVisorAbrirCarpeta = el('btnVisorAbrirCarpeta');
   const swBoxes = el('swBoxes');
@@ -452,25 +415,46 @@ function pct($n, $d): int {
   const cnv = el('cnv');
   const stVisor = el('stVisor');
 
+  async function getJsonRaw(url) {
+    const resp = await fetch(url, { headers: { accept: 'application/json' } });
+    const data = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, data };
+  }
+
+  if (typeof window.BuscadorModals !== 'undefined') {
+    window.BuscadorModals.init({
+      getJson: getJsonRaw,
+      buildUrlWithWorkspace: function (url, ws) {
+        const w = ws ?? window.APP_WORKSPACE;
+        if (!w) return url;
+        const sep = url.indexOf('?') >= 0 ? '&' : '?';
+        return url + sep + 'workspace=' + encodeURIComponent(w);
+      },
+      setStatus: setStatus,
+      refs: {
+        modalCarpeta,
+        ttlCarpeta,
+        tagsCarpeta,
+        gridThumbs,
+        modalCarpetaStacked,
+        ttlCarpetaStacked,
+        gridThumbsStacked,
+        modalVisor,
+        ttlImagen,
+        ttlImagenWrap,
+        lnkAbrirOriginal,
+        btnVisorAbrirCarpeta,
+        swBoxes,
+        badgesDet,
+        cnv,
+        stVisor,
+      },
+    });
+  }
+
   let autoRunning = false;
   let autoTablasRunning = false;
   let buscarEtiqTimer = null;
-  let lastFolder = null;
-  let folderFiles = [];
-  let folderFilter = 'ALL';
-  let folderSelectedImageRuta = '';
-
-  let lastFolderStacked = null;
-  let folderFilesStacked = [];
-  let folderSelectedImageRutaStacked = '';
-
-  let visor = {
-    ruta: '',
-    archivo: '',
-    rutaRelativa: '',
-    img: null,
-    detections: [],
-  };
 
   function setStatus(node, state, text) {
     if (!node) return;
@@ -1153,223 +1137,16 @@ function pct($n, $d): int {
     renderCarpetas(data.carpetas || []);
   }
 
-  function buildTagButton(label, active) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'tag-chip' + (active ? ' tag-chip-active' : '');
-    b.textContent = label;
-    return b;
+  async function abrirCarpeta(nombre, ruta, selectedImageRutaRelativa) {
+    return window.BuscadorModals && window.BuscadorModals.openFolder(nombre, ruta, selectedImageRutaRelativa || null, window.APP_WORKSPACE);
   }
 
-  function renderFolderTags() {
-    if (!tagsCarpeta) return;
-    tagsCarpeta.innerHTML = '';
-
-    const tagsSet = {};
-    for (const f of folderFiles) {
-      if (f?.pendiente) tagsSet['PENDIENTE'] = true;
-      const tt = Array.isArray(f?.tags) ? f.tags : [];
-      for (const t of tt) {
-        const s = String(t || '').trim().toUpperCase();
-        if (s) tagsSet[s] = true;
-      }
-    }
-    const tags = Object.keys(tagsSet).sort((a,b) => a.localeCompare(b));
-
-    const allBtn = buildTagButton('Todas', folderFilter === 'ALL');
-    allBtn.addEventListener('click', () => { folderFilter = 'ALL'; renderFolderTags(); renderFolderGrid(); });
-    tagsCarpeta.appendChild(allBtn);
-
-    for (const t of tags) {
-      const displayLabel = t === 'PENDIENTE' ? 'Pendiente' : tagLabelToFullText(t);
-      const b = buildTagButton(displayLabel, folderFilter === t);
-      b.addEventListener('click', () => { folderFilter = t; renderFolderTags(); renderFolderGrid(); });
-      tagsCarpeta.appendChild(b);
-    }
-  }
-
-  function fileMatchesFilter(f) {
-    if (folderFilter === 'ALL') return true;
-    if (folderFilter === 'PENDIENTE') return !!f?.pendiente;
-    const tt = Array.isArray(f?.tags) ? f.tags : [];
-    for (const t of tt) {
-      if (String(t || '').trim().toUpperCase() === folderFilter) return true;
-    }
-    return false;
-  }
-
-  function renderFolderGrid() {
-    if (!gridThumbs) return;
-    gridThumbs.innerHTML = '';
-    const files = folderFiles.filter((f) => f?.es_imagen && fileMatchesFilter(f));
-    if (!files.length) {
-      const div = document.createElement('div');
-      div.className = 'col-12 text-muted';
-      div.textContent = 'No hay imágenes para el filtro seleccionado';
-      gridThumbs.appendChild(div);
-      return;
-    }
-    for (const f of files) {
-      const nombre = String(f?.nombre || '').trim();
-      const rutaRel = String(f?.ruta_relativa || '').trim();
-      const tags = Array.isArray(f?.tags) ? f.tags : [];
-      const tagLabels = tags.map(t => String(t || '').trim()).filter(Boolean);
-      if (f?.pendiente) tagLabels.unshift('PENDIENTE');
-
-      const col = document.createElement('div');
-      col.className = 'col-6 col-sm-4 col-md-3 col-lg-2 mb-3';
-      col.dataset.rutaRelativa = rutaRel;
-      const card = document.createElement('div');
-      card.className = 'thumb-card' + (rutaRel === folderSelectedImageRuta ? ' thumb-card-selected' : '');
-      const a = document.createElement('a');
-      a.href = '#';
-      const imgWrap = document.createElement('div');
-      imgWrap.className = 'thumb-card-img';
-      const img = document.createElement('img');
-      img.alt = nombre;
-      img.loading = 'lazy';
-      img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(lastFolder?.ruta || '')}&archivo=${encodeURIComponent(nombre)}&thumb=1&w=240`);
-      imgWrap.appendChild(img);
-      a.appendChild(imgWrap);
-      const body = document.createElement('div');
-      body.className = 'thumb-card-body';
-      const title = document.createElement('div');
-      title.className = 'thumb-card-title';
-      title.textContent = nombre || '—';
-      title.title = nombre || '';
-      body.appendChild(title);
-      if (tagLabels.length > 0) {
-        const tagRow = document.createElement('div');
-        tagRow.className = 'thumb-card-tags';
-        for (const lab of tagLabels.slice(0, 5)) {
-          const chip = document.createElement('span');
-          chip.className = 'tag-chip-inline';
-          const displayLab = lab === 'PENDIENTE' ? 'Pendiente' : tagLabelToFullText(lab);
-          chip.textContent = displayLab.replace(/</g, '\u200b');
-          tagRow.appendChild(chip);
-        }
-        if (tagLabels.length > 5) {
-          const more = document.createElement('span');
-          more.className = 'tag-chip-inline';
-          more.textContent = '+' + (tagLabels.length - 5);
-          tagRow.appendChild(more);
-        }
-        body.appendChild(tagRow);
-      }
-      a.appendChild(body);
-      a.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await abrirVisor(lastFolder?.ruta || '', nombre, rutaRel);
-      });
-      card.appendChild(a);
-      col.appendChild(card);
-      gridThumbs.appendChild(col);
-    }
-  }
-
-  function renderFolderGridStacked() {
-    if (!gridThumbsStacked) return;
-    gridThumbsStacked.innerHTML = '';
-    const files = folderFilesStacked.filter((f) => f?.es_imagen);
-    if (!files.length) {
-      const div = document.createElement('div');
-      div.className = 'col-12 text-muted';
-      div.textContent = 'No hay imágenes';
-      gridThumbsStacked.appendChild(div);
-      return;
-    }
-    for (const f of files) {
-      const nombre = String(f?.nombre || '').trim();
-      const rutaRel = String(f?.ruta_relativa || '').trim();
-      const rutaCarpeta = String(lastFolderStacked?.ruta || '').trim();
-      const tags = Array.isArray(f?.tags) ? f.tags : [];
-      const tagLabels = tags.map(t => String(t || '').trim()).filter(Boolean);
-      if (f?.pendiente) tagLabels.unshift('PENDIENTE');
-
-      const col = document.createElement('div');
-      col.className = 'col-6 col-sm-4 col-md-3 col-lg-2 mb-3';
-      col.dataset.rutaRelativa = rutaRel;
-      const card = document.createElement('div');
-      card.className = 'thumb-card' + (rutaRel === folderSelectedImageRutaStacked ? ' thumb-card-selected' : '');
-      const a = document.createElement('a');
-      a.href = '#';
-      const imgWrap = document.createElement('div');
-      imgWrap.className = 'thumb-card-img';
-      const img = document.createElement('img');
-      img.alt = nombre;
-      img.loading = 'lazy';
-      img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(rutaCarpeta)}&archivo=${encodeURIComponent(nombre)}&thumb=1&w=240`);
-      imgWrap.appendChild(img);
-      a.appendChild(imgWrap);
-      const body = document.createElement('div');
-      body.className = 'thumb-card-body';
-      const title = document.createElement('div');
-      title.className = 'thumb-card-title';
-      title.textContent = nombre || '—';
-      title.title = nombre || '';
-      body.appendChild(title);
-      if (tagLabels.length > 0) {
-        const tagRow = document.createElement('div');
-        tagRow.className = 'thumb-card-tags';
-        for (const lab of tagLabels.slice(0, 5)) {
-          const chip = document.createElement('span');
-          chip.className = 'tag-chip-inline';
-          chip.textContent = (lab === 'PENDIENTE' ? 'Pendiente' : tagLabelToFullText(lab)).replace(/</g, '\u200b');
-          tagRow.appendChild(chip);
-        }
-        if (tagLabels.length > 5) {
-          const more = document.createElement('span');
-          more.className = 'tag-chip-inline';
-          more.textContent = '+' + (tagLabels.length - 5);
-          tagRow.appendChild(more);
-        }
-        body.appendChild(tagRow);
-      }
-      a.appendChild(body);
-      a.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await abrirVisor(rutaCarpeta, nombre, rutaRel);
-      });
-      card.appendChild(a);
-      col.appendChild(card);
-      gridThumbsStacked.appendChild(col);
-    }
+  async function abrirVisor(ruta, archivo, rutaRelativa) {
+    return window.BuscadorModals && window.BuscadorModals.openVisor(ruta, archivo, rutaRelativa, window.APP_WORKSPACE);
   }
 
   async function abrirCarpetaStacked(nombre, ruta, selectedImageRutaRelativa) {
-    folderSelectedImageRutaStacked = String(selectedImageRutaRelativa || '').trim();
-    lastFolderStacked = { nombre: String(nombre || ''), ruta: String(ruta || '') };
-    folderFilesStacked = [];
-    if (ttlCarpetaStacked) ttlCarpetaStacked.textContent = lastFolderStacked.nombre || 'Carpeta';
-    if (gridThumbsStacked) gridThumbsStacked.innerHTML = '';
-
-    if (window.jQuery) window.jQuery('#modalCarpetaStacked').modal('show');
-    const { ok, data } = await getJson(`?action=ver_carpeta&ruta=${encodeURIComponent(lastFolderStacked.ruta)}`);
-    if (!ok || !data?.success) {
-      if (gridThumbsStacked) {
-        const div = document.createElement('div');
-        div.className = 'col-12 text-danger';
-        div.textContent = String(data?.error || 'Error');
-        gridThumbsStacked.appendChild(div);
-      }
-      folderSelectedImageRutaStacked = '';
-      return;
-    }
-    folderFilesStacked = Array.isArray(data.archivos) ? data.archivos : [];
-    renderFolderGridStacked();
-
-    if (folderSelectedImageRutaStacked && gridThumbsStacked) {
-      const col = gridThumbsStacked.querySelector(`[data-ruta-relativa="${CSS.escape(folderSelectedImageRutaStacked)}"]`);
-      if (col) {
-        col.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-        const card = col.querySelector('.thumb-card');
-        if (card) {
-          card.classList.add('thumb-card-selected');
-          setTimeout(() => card.classList.remove('thumb-card-selected'), 1300);
-        }
-      }
-      folderSelectedImageRutaStacked = '';
-    }
+    return window.BuscadorModals && window.BuscadorModals.openFolderStacked(nombre, ruta, selectedImageRutaRelativa || null, window.APP_WORKSPACE);
   }
 
   function renderGridSoloResultadosEtiq(items) {
@@ -1438,156 +1215,8 @@ function pct($n, $d): int {
     if (ttlCarpeta) ttlCarpeta.textContent = 'Resultados de búsqueda (' + lastResultadosEtiq.length + ')';
     if (tagsCarpeta) tagsCarpeta.innerHTML = '';
     if (gridThumbs) gridThumbs.innerHTML = '';
-    lastFolder = null;
-    folderFiles = [];
-    folderFilter = 'ALL';
     if (window.jQuery) window.jQuery('#modalCarpeta').modal('show');
     renderGridSoloResultadosEtiq(lastResultadosEtiq);
-  }
-
-  async function abrirCarpeta(nombre, ruta, selectedImageRutaRelativa) {
-    folderSelectedImageRuta = String(selectedImageRutaRelativa || '').trim();
-    lastFolder = { nombre: String(nombre || ''), ruta: String(ruta || '') };
-    folderFilter = 'ALL';
-    folderFiles = [];
-    if (ttlCarpeta) ttlCarpeta.textContent = lastFolder.nombre || 'Carpeta';
-    if (tagsCarpeta) tagsCarpeta.innerHTML = '';
-    if (gridThumbs) gridThumbs.innerHTML = '';
-
-    if (window.jQuery) window.jQuery('#modalCarpeta').modal('show');
-    const { ok, data } = await getJson(`?action=ver_carpeta&ruta=${encodeURIComponent(lastFolder.ruta)}`);
-    if (!ok || !data?.success) {
-      if (gridThumbs) {
-        const div = document.createElement('div');
-        div.className = 'col-12 text-danger';
-        div.textContent = String(data?.error || 'Error');
-        gridThumbs.appendChild(div);
-      }
-      folderSelectedImageRuta = '';
-      return;
-    }
-    folderFiles = Array.isArray(data.archivos) ? data.archivos : [];
-    renderFolderTags();
-    renderFolderGrid();
-
-    if (folderSelectedImageRuta && gridThumbs) {
-      const col = gridThumbs.querySelector(`[data-ruta-relativa="${CSS.escape(folderSelectedImageRuta)}"]`);
-      if (col) {
-        col.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-        const card = col.querySelector('.thumb-card');
-        if (card) {
-          card.classList.add('thumb-card-selected');
-          setTimeout(() => card.classList.remove('thumb-card-selected'), 1300);
-        }
-      }
-      folderSelectedImageRuta = '';
-    }
-  }
-
-  function renderDetBadges(dets, pending) {
-    if (!badgesDet) return;
-    badgesDet.innerHTML = '';
-    if (pending) {
-      const b = document.createElement('span');
-      b.className = 'badge badge-warning mr-1';
-      b.textContent = 'PENDIENTE';
-      badgesDet.appendChild(b);
-    }
-    const arr = Array.isArray(dets) ? dets : [];
-    const top = arr.slice(0, 20);
-    for (const d of top) {
-      const lab = String(d?.label || '').trim();
-      const sc = Number(d?.score || 0);
-      if (!lab) continue;
-      const b = document.createElement('span');
-      b.className = 'badge badge-light mr-1';
-      b.textContent = `${lab} ${sc.toFixed(3)}`;
-      badgesDet.appendChild(b);
-    }
-  }
-
-  function drawCanvas() {
-    if (!cnv) return;
-    if (!visor.img) return;
-    const img = visor.img;
-    const show = !!(swBoxes && swBoxes.checked);
-    const ctx = cnv.getContext('2d');
-    if (!ctx) return;
-
-    const naturalW = img.naturalWidth || img.width || 1;
-    const naturalH = img.naturalHeight || img.height || 1;
-    // Espacio disponible: un poco más pequeño que el viewport (márgenes visibles)
-    const marginW = 160;
-    const marginH = 280;
-    const maxW = Math.max(320, (document.documentElement.clientWidth || window.innerWidth) - marginW);
-    const maxH = Math.max(240, (window.innerHeight || document.documentElement.clientHeight) - marginH);
-    const scale = Math.min(maxW / naturalW, maxH / naturalH);
-    const displayW = Math.round(naturalW * scale);
-    const displayH = Math.round(naturalH * scale);
-
-    cnv.width = displayW;
-    cnv.height = displayH;
-    ctx.clearRect(0, 0, displayW, displayH);
-    ctx.drawImage(img, 0, 0, naturalW, naturalH, 0, 0, displayW, displayH);
-
-    if (!show) return;
-
-    const dets = Array.isArray(visor.detections) ? visor.detections : [];
-    const lineW = Math.max(1.5, displayW / 600);
-    const fontSize = Math.max(12, displayW / 60);
-    ctx.lineWidth = lineW;
-    ctx.font = `${Math.round(fontSize)}px "Source Sans Pro", sans-serif`;
-    for (const d of dets) {
-      const box = Array.isArray(d?.box) ? d.box : null;
-      if (!box || box.length !== 4) continue;
-      const x1 = Number(box[0] || 0), y1 = Number(box[1] || 0), x2 = Number(box[2] || 0), y2 = Number(box[3] || 0);
-      const w = Math.max(1, (x2 - x1) * scale);
-      const h = Math.max(1, (y2 - y1) * scale);
-      const sx1 = x1 * scale;
-      const sy1 = y1 * scale;
-      ctx.strokeStyle = '#dc3545';
-      ctx.strokeRect(sx1, sy1, w, h);
-      const label = String(d?.label || '').trim();
-      const score = Number(d?.score || 0);
-      const text = label ? `${label} ${score.toFixed(3)}` : score.toFixed(3);
-      ctx.fillStyle = '#dc3545';
-      ctx.fillText(text, sx1 + 4, Math.max(fontSize + 2, sy1 - 4));
-    }
-  }
-
-  async function abrirVisor(ruta, archivo, rutaRelativa) {
-    visor.ruta = String(ruta || '');
-    visor.archivo = String(archivo || '');
-    visor.rutaRelativa = String(rutaRelativa || '');
-    visor.detections = [];
-    visor.img = null;
-    const ttlWrap = el('ttlImagenWrap');
-    if (ttlImagen) {
-      ttlImagen.textContent = visor.archivo || 'Imagen';
-      if (ttlWrap) ttlWrap.title = visor.archivo || '';
-    }
-    if (stVisor) stVisor.textContent = 'Cargando…';
-    if (lnkAbrirOriginal) lnkAbrirOriginal.href = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(visor.ruta)}&archivo=${encodeURIComponent(visor.archivo)}`);
-
-    renderDetBadges([], true);
-    if (window.jQuery) window.jQuery('#modalVisor').modal('show');
-
-    const img = new Image();
-    img.onload = async () => {
-      visor.img = img;
-      // Detecciones
-      const { ok, data } = await getJson(`?action=imagen_detecciones&ruta_relativa=${encodeURIComponent(visor.rutaRelativa)}`);
-      const pending = !!data?.pending;
-      const dets = Array.isArray(data?.detections) ? data.detections : [];
-      visor.detections = dets;
-      renderDetBadges(dets, pending);
-      drawCanvas();
-      setStatus(stVisor, 'ok', pending ? 'Pendiente de procesamiento' : 'OK');
-    };
-    img.onerror = () => {
-      setStatus(stVisor, 'bad', 'No se pudo cargar la imagen');
-    };
-    img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(visor.ruta)}&archivo=${encodeURIComponent(visor.archivo)}`);
   }
 
   const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?|avif|heic|heif|ico|svg)$/i;
@@ -1748,8 +1377,8 @@ function pct($n, $d): int {
       }
     });
   }
-  const btnBuscarCarpetas = document.getElementById('btnBuscarCarpetas');
-  if (btnBuscarCarpetas) btnBuscarCarpetas.addEventListener('click', () => buscarCarpetas(true));
+  const btnBuscarCarpeta = document.getElementById('btnBuscarCarpeta');
+  if (btnBuscarCarpeta) btnBuscarCarpeta.addEventListener('click', () => buscarCarpetas(true));
 
   // Expandir un buscador y colapsar el otro (solo uno expandido a la vez)
   const acordeon = document.getElementById('buscadorAcordeon');
@@ -1795,33 +1424,7 @@ function pct($n, $d): int {
     });
   }
 
-  if (swBoxes) swBoxes.addEventListener('change', drawCanvas);
-
-  if (btnVisorAbrirCarpeta) {
-    btnVisorAbrirCarpeta.addEventListener('click', (e) => {
-      e.preventDefault();
-      const folderPath = (visor.ruta || '').trim() || (visor.rutaRelativa || '').replace(/\/[^/]+$/, '').trim();
-      if (!folderPath) return;
-      const parts = folderPath.split('/').filter(Boolean);
-      const folderName = parts.length ? parts[parts.length - 1] : folderPath;
-      const rutaRelativa = visor.rutaRelativa;
-      if (window.jQuery) {
-        window.jQuery('#modalVisor').one('hidden.bs.modal', () => {
-          abrirCarpetaStacked(folderName, folderPath, rutaRelativa);
-        });
-        window.jQuery('#modalVisor').modal('hide');
-      } else {
-        abrirCarpetaStacked(folderName, folderPath, rutaRelativa);
-      }
-    });
-  }
-
-  if (window.jQuery) {
-    window.jQuery('#modalVisor').on('shown.bs.modal', () => drawCanvas());
-  }
-  window.addEventListener('resize', () => {
-    if (modalVisor && modalVisor.classList.contains('show')) drawCanvas();
-  });
+  // Visor "Ir a carpeta", canvas y resize están cableados en BuscadorModals.init()
 
   // Tablas auto (solo si existe)
   const switchAutoTablas = document.getElementById('switchAutoTablas');
