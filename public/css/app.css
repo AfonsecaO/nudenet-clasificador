@@ -869,6 +869,12 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   background: var(--warning-bg);
   color: var(--warning);
 }
+.folder-item-workspace {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 .folder-item-path {
   font-size: 0.8125rem;
   color: var(--text-muted);
@@ -2484,4 +2490,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 .ws-processing-bar #btnStopAll {
   flex-shrink: 0;
   margin-left: auto;
+}
+.ws-card-actions .ws-btn-processing {
+  cursor: pointer;
 }

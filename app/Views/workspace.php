@@ -31,13 +31,8 @@ function fmtTs($ts): string {
 <main class="main content page-workspaces">
   <div class="container ws-container">
     <?php if (!empty($workspaces)): ?>
-    <div id="workspaceProcessingPanel" class="ws-processing" style="display: none;">
-      <div class="ws-processing-bar">
-        <span class="ws-processing-label"><i class="fas fa-sync-alt fa-spin" aria-hidden="true"></i> Procesando</span>
-        <div id="workspaceProcessingList" class="ws-processing-list"></div>
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnStopAll" title="Detener todos">Detener todos</button>
-      </div>
-    </div>
+    <!-- Barra global oculta: el estado de procesamiento se muestra en cada botón de la card -->
+    <div id="workspaceProcessingPanel" class="ws-processing" style="display: none;" aria-hidden="true"></div>
     <?php endif; ?>
 
     <?php if (empty($workspaces)): ?>
@@ -320,8 +315,8 @@ function fmtTs($ts): string {
   const downloadQueue = new Set();
   const classifyQueue = new Set();
   const panelEl = document.getElementById('workspaceProcessingPanel');
-  const listEl = document.getElementById('workspaceProcessingList');
-  const btnStopAll = document.getElementById('btnStopAll');
+  const listEl = null;
+  const btnStopAll = null;
 
   let worker = null;
   try {
@@ -376,32 +371,46 @@ function fmtTs($ts): string {
     if (Array.isArray(state.classify)) { classifyQueue.clear(); state.classify.forEach((ws) => classifyQueue.add(ws)); }
   }
 
+  const lastButtonMetrics = {}; // ws -> { descargar: string, clasificar: string }
+
+  function setButtonProcessing(btn, type, metricsText) {
+    if (!btn) return;
+    btn.disabled = false;
+    btn.classList.add('ws-btn-processing');
+    const text = (metricsText && metricsText.trim()) ? metricsText.trim() : '—';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1" aria-hidden="true"></i>' + text.replace(/</g, '&lt;');
+    const stopWrap = btn.nextElementSibling;
+    if (stopWrap && stopWrap.classList.contains('ws-btn-stop-wrap')) stopWrap.remove();
+  }
+
+  function setButtonIdle(btn, type) {
+    if (!btn) return;
+    btn.disabled = false;
+    btn.classList.remove('ws-btn-processing');
+    if (type === 'descargar') btn.innerHTML = '<i class="fas fa-download"></i> Descargar';
+    else btn.innerHTML = '<i class="fas fa-robot"></i> Clasificar';
+    const stopWrap = btn.nextElementSibling;
+    if (stopWrap && stopWrap.classList.contains('ws-btn-stop-wrap')) stopWrap.remove();
+  }
+
   function updateProcessingPanel() {
-    if (!listEl) return;
-    const items = [];
-    downloadQueue.forEach((ws) => items.push({ ws, type: 'descargar', label: 'Descargar tablas' }));
-    classifyQueue.forEach((ws) => items.push({ ws, type: 'clasificar', label: 'Clasificar' }));
-    if (items.length === 0) {
-      if (panelEl) panelEl.style.display = 'none';
-      return;
-    }
-    if (panelEl) panelEl.style.display = 'block';
-    listEl.innerHTML = items.map((it) =>
-      `<div class="ws-processing-chip" data-ws="${it.ws}" data-type="${it.type}">
-        <span class="ws-processing-ws">${it.ws}</span>
-        <span class="ws-processing-type">${it.label}</span>
-        <span class="ws-processing-metrics" data-ws="${it.ws}" data-type="${it.type}">—</span>
-        <button type="button" class="ws-processing-remove btnStopOne" data-ws="${it.ws}" data-type="${it.type}" title="Quitar" aria-label="Quitar">×</button>
-      </div>`
-    ).join('');
-    listEl.querySelectorAll('.ws-processing-remove').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const ws = btn.getAttribute('data-ws');
-        const type = btn.getAttribute('data-type');
-        if (type === 'descargar') { downloadQueue.delete(ws); if (worker) worker.postMessage({ type: 'remove', mode: 'download', ws }); }
-        else { classifyQueue.delete(ws); if (worker) worker.postMessage({ type: 'remove', mode: 'classify', ws }); }
-        updateProcessingPanel();
-      });
+    document.querySelectorAll('.btnWsDescargar[data-ws]').forEach((btn) => {
+      const ws = btn.getAttribute('data-ws');
+      if (downloadQueue.has(ws)) {
+        const metrics = (lastButtonMetrics[ws] && lastButtonMetrics[ws].descargar) || '';
+        setButtonProcessing(btn, 'descargar', metrics);
+      } else {
+        setButtonIdle(btn, 'descargar');
+      }
+    });
+    document.querySelectorAll('.btnWsClasificar[data-ws]').forEach((btn) => {
+      const ws = btn.getAttribute('data-ws');
+      if (classifyQueue.has(ws)) {
+        const metrics = (lastButtonMetrics[ws] && lastButtonMetrics[ws].clasificar) || '';
+        setButtonProcessing(btn, 'clasificar', metrics);
+      } else {
+        setButtonIdle(btn, 'clasificar');
+      }
     });
   }
 
@@ -459,19 +468,30 @@ function fmtTs($ts): string {
     return '—';
   }
 
+  function updateButtonMetricsLabel(ws, type, metricsText) {
+    lastButtonMetrics[ws] = lastButtonMetrics[ws] || {};
+    lastButtonMetrics[ws][type] = metricsText;
+    const sel = type === 'descargar' ? '.btnWsDescargar' : '.btnWsClasificar';
+    const btn = document.querySelector(`${sel}[data-ws="${ws}"]`);
+    if (!btn || !btn.classList.contains('ws-btn-processing')) return;
+    const text = (metricsText && metricsText.trim()) ? metricsText.trim() : '—';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1" aria-hidden="true"></i>' + text.replace(/</g, '&lt;');
+  }
+
   function applyTickToPanel(msg) {
     const { mode, ws, data } = msg;
     if (!data || !ws) return;
     const type = mode === 'download' ? 'descargar' : 'clasificar';
-    const el = listEl?.querySelector(`.ws-processing-metrics[data-ws="${ws}"][data-type="${type}"]`);
     if (mode === 'download') {
       const stats = data?.clasificacion_stats;
       const imagenes = stats && (typeof stats.total === 'number') ? stats.total : null;
-      if (el) el.textContent = formatMetrics(type, null, { imagenes_totales: imagenes ?? 0 });
+      const metricsText = formatMetrics(type, null, { imagenes_totales: imagenes ?? 0 });
+      updateButtonMetricsLabel(ws, type, metricsText);
       if (stats) updateCardStats(ws, { total: stats.total, pendientes: stats.pendientes, pendientes_deteccion: stats.pendientes_deteccion ?? stats.pendientes, detections_total: stats.detections_total });
     } else {
       const pendientes = data?.pendientes ?? data?.pendientes_deteccion ?? data?.pending ?? 0;
-      if (el) el.textContent = formatMetrics(type, { pendientes_deteccion: pendientes, pendientes });
+      const metricsText = formatMetrics(type, { pendientes_deteccion: pendientes, pendientes });
+      updateButtonMetricsLabel(ws, type, metricsText);
       updateCardStats(ws, {
         total: data?.stats?.total ?? data?.total,
         pendientes: data?.pendientes,
@@ -501,6 +521,12 @@ function fmtTs($ts): string {
     btn.addEventListener('click', () => {
       const ws = btn.getAttribute('data-ws');
       if (!ws) return;
+      if (downloadQueue.has(ws)) {
+        downloadQueue.delete(ws);
+        if (worker) worker.postMessage({ type: 'remove', mode: 'download', ws });
+        updateProcessingPanel();
+        return;
+      }
       downloadQueue.add(ws);
       updateProcessingPanel();
       if (worker) worker.postMessage({ type: 'add', mode: 'download', ws });
@@ -511,6 +537,12 @@ function fmtTs($ts): string {
     btn.addEventListener('click', () => {
       const ws = btn.getAttribute('data-ws');
       if (!ws) return;
+      if (classifyQueue.has(ws)) {
+        classifyQueue.delete(ws);
+        if (worker) worker.postMessage({ type: 'remove', mode: 'classify', ws });
+        updateProcessingPanel();
+        return;
+      }
       classifyQueue.add(ws);
       updateProcessingPanel();
       if (worker) worker.postMessage({ type: 'add', mode: 'classify', ws });
@@ -518,15 +550,7 @@ function fmtTs($ts): string {
     });
   });
 
-  if (btnStopAll) {
-    btnStopAll.addEventListener('click', () => {
-      downloadQueue.clear();
-      classifyQueue.clear();
-      if (worker) worker.postMessage({ type: 'stopAll' });
-      else mainThreadStopRequested = true;
-      updateProcessingPanel();
-    });
-  }
+  // Detener todos: ya no hay barra global; cada botón tiene su "Detener"
 
   async function abrirWorkspace(slug) {
     const ws = String(slug || '').trim();
@@ -729,17 +753,47 @@ function fmtTs($ts): string {
         lstCarpetasGlobal.innerHTML = '<div class="buscador-empty">Sin resultados</div>';
         return;
       }
+      const FOLDER_MAX_TAGS_VISIBLE = 8;
       for (const c of carpetas) {
         const nombre = String(c?.nombre || c?.ruta || '').trim();
         const ruta = String(c?.ruta || '').trim();
         const total = Number(c?.total_archivos ?? 0);
+        const pend = Number(c?.pendientes ?? 0);
         const ws = String(c?.workspace || '').trim();
-        const a = document.createElement('a');
-        a.href = '#';
-        a.className = 'list-group-item list-group-item-action ws-search-result-item';
-        a.innerHTML = '<span class="badge badge-secondary mr-2">' + ws.replace(/</g, '&lt;') + '</span>' +
-          (nombre.replace(/</g, '&lt;')) + (ruta && ruta !== nombre ? ' <span class="text-muted small">' + ruta.replace(/</g, '&lt;') + '</span>' : '') +
-          ' <span class="badge badge-light ml-1">' + total.toLocaleString() + ' imágenes</span>';
+        const tags = Array.isArray(c?.tags) ? c.tags : [];
+        const avatarUrl = c?.avatar_url || null;
+        const showPath = ruta && ruta !== nombre;
+        const tagBadges = tags.slice(0, FOLDER_MAX_TAGS_VISIBLE).map(function (t) {
+          const lab = String(t?.label || '').trim();
+          const cnt = Number(t?.count || 0);
+          if (!lab) return '';
+          const fullText = tagLabelToFullText(lab);
+          return '<span class="folder-tag"><span class="folder-tag-label">' + fullText.replace(/</g, '&lt;') + '</span> <b class="folder-tag-count">' + cnt + '</b></span>';
+        }).join('');
+        const moreTags = tags.length > FOLDER_MAX_TAGS_VISIBLE ? '<span class="folder-tag folder-tag-more">+' + (tags.length - FOLDER_MAX_TAGS_VISIBLE) + ' más</span>' : '';
+        const avatarHtml = avatarUrl
+          ? '<img src="' + avatarUrl.replace(/"/g, '&quot;') + '" alt="" class="folder-item-avatar" loading="lazy">'
+          : '<span class="folder-item-avatar folder-item-avatar-placeholder" aria-hidden="true"><i class="fas fa-folder"></i></span>';
+        const statusHtml = pend === 0
+          ? '<span class="folder-item-status folder-item-status-ok">Procesado</span>'
+          : '<span class="folder-item-status folder-item-status-pend">' + pend + ' pendientes</span>';
+        const wsBadge = ws ? '<span class="folder-item-workspace badge badge-secondary ml-1">' + ws.replace(/</g, '&lt;') + '</span>' : '';
+        const linkHtml = '<a href="#" class="list-group-item list-group-item-action folder-list-item ws-search-result-item">' +
+          '<div class="d-flex w-100 folder-item-inner">' +
+          '<div class="folder-item-avatar-wrap">' + avatarHtml + '</div>' +
+          '<div class="folder-item-body">' +
+          '<div class="folder-item-head">' +
+          '<h6 class="folder-item-title">' + nombre.replace(/</g, '&lt;') + '</h6>' +
+          '<span class="folder-item-meta">' +
+          '<span class="folder-item-count">' + total.toLocaleString() + ' imágenes</span>' +
+          statusHtml + wsBadge +
+          '</span></div>' +
+          (showPath ? '<div class="folder-item-path">' + ruta.replace(/</g, '&lt;') + '</div>' : '') +
+          (tagBadges || moreTags ? '<div class="folder-item-tags">' + tagBadges + moreTags + '</div>' : '') +
+          '</div></div></a>';
+        const wrap = document.createElement('div');
+        wrap.innerHTML = linkHtml;
+        const a = wrap.querySelector('a');
         a.addEventListener('click', async (e) => {
           e.preventDefault();
           try {

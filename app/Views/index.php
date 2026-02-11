@@ -917,6 +917,8 @@ function pct($n, $d): int {
 
     const linesHtml = buildTreeRowLines(depth, hasMoreBelow, isLast, hasChildren, isExpanded);
 
+    const currentWs = (typeof window.APP_WORKSPACE !== 'undefined' && window.APP_WORKSPACE) ? String(window.APP_WORKSPACE).trim() : '';
+    const wsBadge = currentWs ? '<span class="folder-item-workspace badge badge-secondary ml-1">' + currentWs.replace(/</g, '&lt;') + '</span>' : '';
     const linkHtml = c
       ? `<a href="#" class="list-group-item list-group-item-action folder-list-item folder-tree-item">
           <div class="d-flex w-100 folder-item-inner">
@@ -927,6 +929,7 @@ function pct($n, $d): int {
                 <span class="folder-item-meta">
                   <span class="folder-item-count">${total} imágenes</span>
                   ${pend === 0 ? '<span class="folder-item-status folder-item-status-ok">Procesado</span>' : `<span class="folder-item-status folder-item-status-pend">${pend} pendientes</span>`}
+                  ${wsBadge}
                 </span>
               </div>
               ${showPath ? `<div class="folder-item-path">${ruta.replace(/</g, '&lt;')}</div>` : ''}
@@ -1023,6 +1026,8 @@ function pct($n, $d): int {
       const avatarHtml = avatarUrl
         ? `<img src="${avatarUrl.replace(/"/g, '&quot;')}" alt="" class="folder-item-avatar" loading="lazy">`
         : '<span class="folder-item-avatar folder-item-avatar-placeholder" aria-hidden="true"><i class="fas fa-folder"></i></span>';
+      const currentWs = (typeof window.APP_WORKSPACE !== 'undefined' && window.APP_WORKSPACE) ? String(window.APP_WORKSPACE).trim() : '';
+      const wsBadge = currentWs ? '<span class="folder-item-workspace badge badge-secondary ml-1">' + currentWs.replace(/</g, '&lt;') + '</span>' : '';
       const linkHtml = `<a href="#" class="list-group-item list-group-item-action folder-list-item">
           <div class="d-flex w-100 folder-item-inner">
             <div class="folder-item-avatar-wrap">${avatarHtml}</div>
@@ -1032,6 +1037,7 @@ function pct($n, $d): int {
                 <span class="folder-item-meta">
                   <span class="folder-item-count">${total} imágenes</span>
                   ${pend === 0 ? '<span class="folder-item-status folder-item-status-ok">Procesado</span>' : `<span class="folder-item-status folder-item-status-pend">${pend} pendientes</span>`}
+                  ${wsBadge}
                 </span>
               </div>
               ${showPath ? `<div class="folder-item-path">${ruta.replace(/</g, '&lt;')}</div>` : ''}

@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Models\CarpetasIndex;
+use PDO;
 use App\Services\StringNormalizer;
 use App\Services\SqliteConnection;
 use App\Services\SqliteSchema;
@@ -187,16 +188,14 @@ class CarpetasController extends BaseController
     /**
      * Para cada carpeta obtiene la primera imagen con FACE_FEMALE o FACE_MALE (en ese orden)
      * y genera/cachea un avatar (recorte cuadrado del bbox, redimensionado).
+     * Si se pasa $slug y $pdo se usa ese workspace; si no, el actual.
      */
-    private function enriquecerCarpetasConAvatares(array $carpetas): array
+    public function enriquecerCarpetasConAvataresParaWorkspace(string $slug, array $carpetas, PDO $pdo): array
     {
         if (empty($carpetas)) return $carpetas;
 
-        $ws = WorkspaceService::current();
-        if ($ws === null) return $carpetas;
-
-        WorkspaceService::ensureStructure($ws);
-        $paths = WorkspaceService::paths($ws);
+        WorkspaceService::ensureStructure($slug);
+        $paths = WorkspaceService::paths($slug);
         $imagesDir = $paths['imagesDir'] ?? '';
         $avatarsDir = $paths['avatarsDir'] ?? '';
         if ($imagesDir === '' || $avatarsDir === '') return $carpetas;
@@ -211,17 +210,17 @@ class CarpetasController extends BaseController
         $rutas = array_values(array_unique($rutas));
         if (empty($rutas)) return $carpetas;
 
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
         $ph = implode(',', array_fill(0, count($rutas), '?'));
 
         $stmt = $pdo->prepare("
-            SELECT i.ruta_carpeta AS ruta, d.image_ruta_relativa AS img, d.score AS score, d.x1, d.y1, d.x2, d.y2
+            SELECT i.ruta_carpeta AS ruta, d.image_ruta_relativa AS img, d.label AS label, d.score AS score, d.x1, d.y1, d.x2, d.y2
             FROM images i
             JOIN detections d ON d.image_ruta_relativa = i.ruta_relativa
-            WHERE i.ruta_carpeta IN ($ph) AND d.label IN ('FACE_FEMALE', 'FACE_MALE')
+            WHERE i.ruta_carpeta IN ($ph) AND d.label IN ('FACE_FEMALE', 'FACE_MALE', 'FEMALE_BREAST_EXPOSED', 'FEMALE_BREAST_COVERED')
               AND d.x1 IS NOT NULL AND d.y1 IS NOT NULL AND d.x2 IS NOT NULL AND d.y2 IS NOT NULL
-            ORDER BY i.ruta_carpeta, d.score DESC, (d.x2 - d.x1) * (d.y2 - d.y1) DESC, CASE WHEN d.label = 'FACE_FEMALE' THEN 0 ELSE 1 END, i.ruta_relativa
+            ORDER BY i.ruta_carpeta, d.score DESC, (d.x2 - d.x1) * (d.y2 - d.y1) DESC,
+              CASE d.label WHEN 'FACE_FEMALE' THEN 0 WHEN 'FACE_MALE' THEN 1 WHEN 'FEMALE_BREAST_EXPOSED' THEN 2 WHEN 'FEMALE_BREAST_COVERED' THEN 3 ELSE 4 END,
+              i.ruta_relativa
         ");
         $stmt->execute($rutas);
         $rows = $stmt->fetchAll() ?: [];
@@ -238,6 +237,7 @@ class CarpetasController extends BaseController
             $score = isset($r['score']) ? (float)$r['score'] : 0.0;
             $firstByRuta[$ruta] = [
                 'image_ruta_relativa' => (string)($r['img'] ?? ''),
+                'label' => (string)($r['label'] ?? ''),
                 'score' => $score,
                 'x1' => $x1, 'y1' => $y1, 'x2' => $x2, 'y2' => $y2
             ];
@@ -258,17 +258,19 @@ class CarpetasController extends BaseController
                 if (is_file($metaPath)) {
                     $metaContent = @file_get_contents($metaPath);
                     if ($metaContent !== false) {
-                        $lines = explode("\n", trim($metaContent), 2);
+                        $lines = explode("\n", trim($metaContent), 3);
                         $cachedImg = isset($lines[0]) ? trim($lines[0]) : '';
                         $cachedScore = isset($lines[1]) ? trim($lines[1]) : '';
+                        $cachedLabel = isset($lines[2]) ? trim($lines[2]) : '';
                         $currentScoreStr = (string)$face['score'];
-                        if ($cachedImg === $face['image_ruta_relativa'] && $cachedScore === $currentScoreStr) {
+                        $currentLabel = (string)($face['label'] ?? '');
+                        if ($cachedImg === $face['image_ruta_relativa'] && $cachedScore === $currentScoreStr && $cachedLabel === $currentLabel) {
                             $useCached = true;
                         }
                     }
                 }
                 if ($useCached) {
-                    $c['avatar_url'] = '?action=ver_avatar&k=' . urlencode($key);
+                    $c['avatar_url'] = '?action=ver_avatar&workspace=' . rawurlencode($slug) . '&k=' . urlencode($key);
                     continue;
                 }
                 @unlink($cachePath);
@@ -302,6 +304,10 @@ class CarpetasController extends BaseController
             $side = max($w, $h);
             $cx = (int)(($x1 + $x2) / 2);
             $cy = (int)(($y1 + $y2) / 2);
+            $label = (string)($face['label'] ?? '');
+            if ($label === 'FEMALE_BREAST_EXPOSED' || $label === 'FEMALE_BREAST_COVERED') {
+                $cy = (int)($cy - $side * 0.5);
+            }
             $half = (int)($side / 2);
             $sx1 = $cx - $half;
             $sy1 = $cy - $half;
@@ -340,9 +346,9 @@ class CarpetasController extends BaseController
             imagedestroy($dst);
             if ($ok && is_file($tmpPath)) {
                 @rename($tmpPath, $cachePath);
-                $metaContent = $face['image_ruta_relativa'] . "\n" . (string)$face['score'];
+                $metaContent = $face['image_ruta_relativa'] . "\n" . (string)$face['score'] . "\n" . (string)($face['label'] ?? '');
                 @file_put_contents($metaPath, $metaContent);
-                $c['avatar_url'] = '?action=ver_avatar&k=' . urlencode($key);
+                $c['avatar_url'] = '?action=ver_avatar&workspace=' . rawurlencode($slug) . '&k=' . urlencode($key);
             } else {
                 @unlink($tmpPath);
             }
@@ -350,6 +356,16 @@ class CarpetasController extends BaseController
         unset($c);
 
         return $carpetas;
+    }
+
+    /**
+     * Enriquecer con avatares usando el workspace actual (para el index).
+     */
+    private function enriquecerCarpetasConAvatares(array $carpetas): array
+    {
+        $ws = WorkspaceService::current();
+        if ($ws === null || empty($carpetas)) return $carpetas;
+        return $this->enriquecerCarpetasConAvataresParaWorkspace($ws, $carpetas, SqliteConnection::get());
     }
 
     public function buscar()
@@ -730,6 +746,7 @@ class CarpetasController extends BaseController
 
     /**
      * Sirve un avatar cacheado (cache/avatars/{k}.jpg).
+     * Si se pasa ?workspace=slug se usa ese workspace; si no, el actual.
      */
     public function verAvatar(): void
     {
@@ -738,8 +755,16 @@ class CarpetasController extends BaseController
             http_response_code(404);
             die('Avatar no encontrado');
         }
-        $ws = WorkspaceService::current();
-        if ($ws === null) {
+        $ws = isset($_GET['workspace']) ? trim((string)$_GET['workspace']) : null;
+        if ($ws !== null && $ws !== '') {
+            if (!WorkspaceService::isValidSlug($ws) || !WorkspaceService::exists($ws)) {
+                http_response_code(404);
+                die('Avatar no encontrado');
+            }
+        } else {
+            $ws = WorkspaceService::current();
+        }
+        if ($ws === null || $ws === '') {
             http_response_code(404);
             die('Avatar no encontrado');
         }

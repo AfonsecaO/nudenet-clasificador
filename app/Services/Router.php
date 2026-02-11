@@ -16,6 +16,16 @@ class Router
         return strpos($route, 'workspace_') === 0;
     }
 
+    /** Rutas que agregan datos de todos los workspaces y no requieren workspace actual */
+    private static function isGlobalConsolidatedRoute(string $route): bool
+    {
+        return in_array($route, [
+            'buscar_carpetas_global',
+            'etiquetas_detectadas_global',
+            'buscar_imagenes_etiquetas_global',
+        ], true);
+    }
+
     private static function needsWorkspaceResponse(): void
     {
         header('Content-Type: application/json');
@@ -93,7 +103,7 @@ class Router
 
             // Workspace gating: antes de tocar SQLite
             $ws = \App\Services\WorkspaceService::current();
-            if ($ws === null && !self::isWorkspaceRoute((string)$route)) {
+            if ($ws === null && !self::isWorkspaceRoute((string)$route) && !self::isGlobalConsolidatedRoute((string)$route)) {
                 // Para API: responder 409; para vistas: forzar pantalla de workspace
                 $routeConfigTmp = $routes[$route] ?? null;
                 $typeTmp = is_array($routeConfigTmp) ? ($routeConfigTmp['type'] ?? 'api') : 'api';
@@ -111,6 +121,29 @@ class Router
 
             // Si estamos en rutas de workspace (select/create/set), no abrir SQLite ni aplicar setup gating.
             if (self::isWorkspaceRoute((string)$route)) {
+                $routes = self::loadRoutes();
+                if (!isset($routes[$route])) {
+                    self::handleNotFound();
+                    return;
+                }
+                $routeConfig = $routes[$route];
+                $controllerName = $routeConfig['controller'];
+                $method = $routeConfig['method'];
+
+                $controllerClass = "App\\Controllers\\{$controllerName}";
+                if (!class_exists($controllerClass)) {
+                    throw new \Exception("Controlador no encontrado: {$controllerClass}");
+                }
+                $controller = new $controllerClass();
+                if (!method_exists($controller, $method)) {
+                    throw new \Exception("Método no encontrado en {$controllerClass}: {$method}");
+                }
+                $controller->$method();
+                return;
+            }
+
+            // Rutas globales (consolidado de todos los workspaces): no requieren workspace ni abrir su SQLite
+            if (self::isGlobalConsolidatedRoute((string)$route)) {
                 $routes = self::loadRoutes();
                 if (!isset($routes[$route])) {
                     self::handleNotFound();
