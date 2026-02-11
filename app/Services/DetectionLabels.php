@@ -100,6 +100,27 @@ class DetectionLabels
         ];
     }
 
+    /**
+     * Labels que se ignoran por defecto en workspaces nuevos (lista negra inicial).
+     * Si el workspace ya tiene DETECT_IGNORED_LABELS en BD, se prioriza esa configuración.
+     *
+     * @return string[] códigos normalizados
+     */
+    public static function defaultIgnoredLabels(): array
+    {
+        return [
+            'ARMPITS_COVERED',
+            'BELLY_COVERED',
+            'BELLY_EXPOSED',
+            'FACE_FEMALE',
+            'FACE_MALE',
+            'FEET_COVERED',
+            'FEET_EXPOSED',
+            'MALE_BREAST_EXPOSED',
+            'MALE_GENITALIA_EXPOSED',
+        ];
+    }
+
     public static function normalizeLabel(string $label): string
     {
         $label = strtoupper(trim($label));

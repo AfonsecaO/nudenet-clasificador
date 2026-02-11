@@ -280,7 +280,7 @@ $__patronDisplay = preg_replace('/\.ext\s*$/i', '', trim((string)($values['PATRO
               <div class="card-body">
                 <div class="form-group">
                   <label for="CLASIFICADOR_BASE_URL">CLASIFICADOR_BASE_URL</label>
-                  <input class="form-control" id="CLASIFICADOR_BASE_URL" value="<?php echo v('CLASIFICADOR_BASE_URL',$values); ?>" placeholder="http://localhost:8001">
+                  <input class="form-control" id="CLASIFICADOR_BASE_URL" value="<?php echo v('CLASIFICADOR_BASE_URL',$values); ?>" placeholder="http://localhost:8001/">
                   <small class="form-text text-muted">Se marca <span class="text-monospace">unsafe</span> si el detector devuelve cualquier etiqueta no ignorada.</small>
                 </div>
 

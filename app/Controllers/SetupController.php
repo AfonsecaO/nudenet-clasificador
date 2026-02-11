@@ -18,6 +18,16 @@ class SetupController extends BaseController
             $values[$k] = \App\Services\ConfigService::get($k);
         }
 
+        // Workspace nuevo: valores por defecto solo si no hay nada en BD (prioridad a lo guardado)
+        $urlStored = isset($values['CLASIFICADOR_BASE_URL']) ? trim((string)$values['CLASIFICADOR_BASE_URL']) : '';
+        if ($urlStored === '') {
+            $values['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
+        }
+        $ignoredStored = isset($values['DETECT_IGNORED_LABELS']) ? trim((string)$values['DETECT_IGNORED_LABELS']) : '';
+        if ($ignoredStored === '') {
+            $values['DETECT_IGNORED_LABELS'] = implode(',', \App\Services\DetectionLabels::defaultIgnoredLabels());
+        }
+
         $faltantes = \App\Services\ConfigService::faltantesRequeridos();
 
         $this->render('setup', [
@@ -145,7 +155,7 @@ class SetupController extends BaseController
         // Persistir
         $pairs = $cfg;
         // Normalización de defaults opcionales
-        if (empty($pairs['CLASIFICADOR_BASE_URL'])) $pairs['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001';
+        if (empty($pairs['CLASIFICADOR_BASE_URL'])) $pairs['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
         if (!isset($pairs['DETECT_IGNORED_LABELS'])) $pairs['DETECT_IGNORED_LABELS'] = '';
         // Normalizar CSV de labels ignorados
         if (is_array($pairs['DETECT_IGNORED_LABELS'] ?? null)) {
@@ -280,7 +290,7 @@ class SetupController extends BaseController
                     $pairs[$k] = (string)($cfg[$k] ?? '');
                 }
             }
-            if (empty($pairs['CLASIFICADOR_BASE_URL'])) $pairs['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001';
+            if (empty($pairs['CLASIFICADOR_BASE_URL'])) $pairs['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
             if (!isset($pairs['DETECT_IGNORED_LABELS'])) $pairs['DETECT_IGNORED_LABELS'] = '';
 
             // Guardar modo si viene (para wizard)
@@ -530,9 +540,9 @@ class SetupController extends BaseController
             return ['success' => true, 'ok' => false, 'module' => 'clasificador', 'error' => 'La extensión cURL no está habilitada en PHP'];
         }
 
-        $baseUrl = $cfg['CLASIFICADOR_BASE_URL'] ?? 'http://localhost:8001';
+        $baseUrl = $cfg['CLASIFICADOR_BASE_URL'] ?? 'http://localhost:8001/';
         $baseUrl = rtrim(trim((string)$baseUrl), '/');
-        if ($baseUrl === '') $baseUrl = 'http://localhost:8001';
+        if ($baseUrl === '') $baseUrl = 'http://localhost:8001/';
 
         $url = $baseUrl . '/health';
 

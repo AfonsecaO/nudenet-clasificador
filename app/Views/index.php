@@ -278,25 +278,54 @@ function pct($n, $d): int {
   </div>
 </div>
 
-<!-- Modal: visor -->
-<div class="modal fade" id="modalVisor" tabindex="-1" role="dialog" aria-hidden="true">
+<!-- Modal: carpeta apilada (abierta desde visor u otro modal; se cierra y se vuelve al anterior) -->
+<div class="modal fade" id="modalCarpetaStacked" tabindex="-1" role="dialog" aria-hidden="true" data-backdrop="true" data-keyboard="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="fas fa-image"></i> <span id="ttlImagen">Imagen</span></h5>
+        <h5 class="modal-title"><i class="fas fa-folder-open"></i> <span id="ttlCarpetaStacked">Carpeta</span></h5>
         <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
       </div>
-      <div class="modal-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <div class="custom-control custom-switch">
-            <input type="checkbox" class="custom-control-input" id="swBoxes" checked>
-            <label class="custom-control-label" for="swBoxes">Bounding boxes</label>
+      <div class="modal-body modal-carpeta-body">
+        <div class="row mt-2" id="gridThumbsStacked"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: visor -->
+<div class="modal fade" id="modalVisor" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable modal-visor-dialog" role="document">
+    <div class="modal-content modal-visor-content">
+      <div class="modal-header modal-visor-header">
+        <h5 class="modal-title modal-visor-title" title="" id="ttlImagenWrap">
+          <i class="fas fa-image modal-visor-title-icon" aria-hidden="true"></i>
+          <span id="ttlImagen" class="modal-visor-filename">Imagen</span>
+        </h5>
+        <button type="button" class="close modal-visor-close" data-dismiss="modal" aria-label="Cerrar"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body modal-visor-body">
+        <div class="visor-toolbar" role="toolbar" aria-label="Acciones de la imagen">
+          <div class="visor-toolbar-left">
+            <div class="custom-control custom-switch">
+              <input type="checkbox" class="custom-control-input" id="swBoxes" checked>
+              <label class="custom-control-label" for="swBoxes">Bounding boxes</label>
+            </div>
           </div>
-          <a class="btn btn-sm btn-outline-secondary" id="lnkAbrirOriginal" href="#" target="_blank" rel="noopener">
-            <i class="fas fa-external-link-alt"></i> Abrir original
-          </a>
+          <span class="visor-toolbar-divider" aria-hidden="true"></span>
+          <div class="visor-toolbar-buttons">
+            <button type="button" class="btn btn-sm visor-btn visor-btn-folder" id="btnVisorAbrirCarpeta" title="Ir a la carpeta que contiene esta imagen" aria-label="Ir a carpeta">
+              <i class="fas fa-folder-open" aria-hidden="true"></i>
+              <span>Ir a carpeta</span>
+            </button>
+            <a class="btn btn-sm visor-btn visor-btn-original" id="lnkAbrirOriginal" href="#" target="_blank" rel="noopener" title="Abrir imagen original en nueva pestaña">
+              <i class="fas fa-external-link-alt" aria-hidden="true"></i>
+              <span>Abrir original</span>
+            </a>
+          </div>
+          <span class="visor-toolbar-divider visor-toolbar-divider-badges" aria-hidden="true"></span>
+          <div class="visor-badges-wrap" id="badgesDet" aria-label="Detecciones"></div>
         </div>
-        <div class="mb-2" id="badgesDet"></div>
         <div class="visor-canvas-wrap" id="visorCanvasWrap">
           <canvas id="cnv"></canvas>
         </div>
@@ -410,9 +439,14 @@ function pct($n, $d): int {
   const tagsCarpeta = el('tagsCarpeta');
   const gridThumbs = el('gridThumbs');
 
+  const modalCarpetaStacked = el('modalCarpetaStacked');
+  const ttlCarpetaStacked = el('ttlCarpetaStacked');
+  const gridThumbsStacked = el('gridThumbsStacked');
+
   const modalVisor = el('modalVisor');
   const ttlImagen = el('ttlImagen');
   const lnkAbrirOriginal = el('lnkAbrirOriginal');
+  const btnVisorAbrirCarpeta = el('btnVisorAbrirCarpeta');
   const swBoxes = el('swBoxes');
   const badgesDet = el('badgesDet');
   const cnv = el('cnv');
@@ -425,6 +459,10 @@ function pct($n, $d): int {
   let folderFiles = [];
   let folderFilter = 'ALL';
   let folderSelectedImageRuta = '';
+
+  let lastFolderStacked = null;
+  let folderFilesStacked = [];
+  let folderSelectedImageRutaStacked = '';
 
   let visor = {
     ruta: '',
@@ -1229,6 +1267,111 @@ function pct($n, $d): int {
     }
   }
 
+  function renderFolderGridStacked() {
+    if (!gridThumbsStacked) return;
+    gridThumbsStacked.innerHTML = '';
+    const files = folderFilesStacked.filter((f) => f?.es_imagen);
+    if (!files.length) {
+      const div = document.createElement('div');
+      div.className = 'col-12 text-muted';
+      div.textContent = 'No hay imágenes';
+      gridThumbsStacked.appendChild(div);
+      return;
+    }
+    for (const f of files) {
+      const nombre = String(f?.nombre || '').trim();
+      const rutaRel = String(f?.ruta_relativa || '').trim();
+      const rutaCarpeta = String(lastFolderStacked?.ruta || '').trim();
+      const tags = Array.isArray(f?.tags) ? f.tags : [];
+      const tagLabels = tags.map(t => String(t || '').trim()).filter(Boolean);
+      if (f?.pendiente) tagLabels.unshift('PENDIENTE');
+
+      const col = document.createElement('div');
+      col.className = 'col-6 col-sm-4 col-md-3 col-lg-2 mb-3';
+      col.dataset.rutaRelativa = rutaRel;
+      const card = document.createElement('div');
+      card.className = 'thumb-card' + (rutaRel === folderSelectedImageRutaStacked ? ' thumb-card-selected' : '');
+      const a = document.createElement('a');
+      a.href = '#';
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'thumb-card-img';
+      const img = document.createElement('img');
+      img.alt = nombre;
+      img.loading = 'lazy';
+      img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(rutaCarpeta)}&archivo=${encodeURIComponent(nombre)}&thumb=1&w=240`);
+      imgWrap.appendChild(img);
+      a.appendChild(imgWrap);
+      const body = document.createElement('div');
+      body.className = 'thumb-card-body';
+      const title = document.createElement('div');
+      title.className = 'thumb-card-title';
+      title.textContent = nombre || '—';
+      title.title = nombre || '';
+      body.appendChild(title);
+      if (tagLabels.length > 0) {
+        const tagRow = document.createElement('div');
+        tagRow.className = 'thumb-card-tags';
+        for (const lab of tagLabels.slice(0, 5)) {
+          const chip = document.createElement('span');
+          chip.className = 'tag-chip-inline';
+          chip.textContent = (lab === 'PENDIENTE' ? 'Pendiente' : tagLabelToFullText(lab)).replace(/</g, '\u200b');
+          tagRow.appendChild(chip);
+        }
+        if (tagLabels.length > 5) {
+          const more = document.createElement('span');
+          more.className = 'tag-chip-inline';
+          more.textContent = '+' + (tagLabels.length - 5);
+          tagRow.appendChild(more);
+        }
+        body.appendChild(tagRow);
+      }
+      a.appendChild(body);
+      a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await abrirVisor(rutaCarpeta, nombre, rutaRel);
+      });
+      card.appendChild(a);
+      col.appendChild(card);
+      gridThumbsStacked.appendChild(col);
+    }
+  }
+
+  async function abrirCarpetaStacked(nombre, ruta, selectedImageRutaRelativa) {
+    folderSelectedImageRutaStacked = String(selectedImageRutaRelativa || '').trim();
+    lastFolderStacked = { nombre: String(nombre || ''), ruta: String(ruta || '') };
+    folderFilesStacked = [];
+    if (ttlCarpetaStacked) ttlCarpetaStacked.textContent = lastFolderStacked.nombre || 'Carpeta';
+    if (gridThumbsStacked) gridThumbsStacked.innerHTML = '';
+
+    if (window.jQuery) window.jQuery('#modalCarpetaStacked').modal('show');
+    const { ok, data } = await getJson(`?action=ver_carpeta&ruta=${encodeURIComponent(lastFolderStacked.ruta)}`);
+    if (!ok || !data?.success) {
+      if (gridThumbsStacked) {
+        const div = document.createElement('div');
+        div.className = 'col-12 text-danger';
+        div.textContent = String(data?.error || 'Error');
+        gridThumbsStacked.appendChild(div);
+      }
+      folderSelectedImageRutaStacked = '';
+      return;
+    }
+    folderFilesStacked = Array.isArray(data.archivos) ? data.archivos : [];
+    renderFolderGridStacked();
+
+    if (folderSelectedImageRutaStacked && gridThumbsStacked) {
+      const col = gridThumbsStacked.querySelector(`[data-ruta-relativa="${CSS.escape(folderSelectedImageRutaStacked)}"]`);
+      if (col) {
+        col.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        const card = col.querySelector('.thumb-card');
+        if (card) {
+          card.classList.add('thumb-card-selected');
+          setTimeout(() => card.classList.remove('thumb-card-selected'), 1300);
+        }
+      }
+      folderSelectedImageRutaStacked = '';
+    }
+  }
+
   function renderGridSoloResultadosEtiq(items) {
     if (!gridThumbs) return;
     gridThumbs.innerHTML = '';
@@ -1418,7 +1561,11 @@ function pct($n, $d): int {
     visor.rutaRelativa = String(rutaRelativa || '');
     visor.detections = [];
     visor.img = null;
-    if (ttlImagen) ttlImagen.textContent = visor.archivo || 'Imagen';
+    const ttlWrap = el('ttlImagenWrap');
+    if (ttlImagen) {
+      ttlImagen.textContent = visor.archivo || 'Imagen';
+      if (ttlWrap) ttlWrap.title = visor.archivo || '';
+    }
     if (stVisor) stVisor.textContent = 'Cargando…';
     if (lnkAbrirOriginal) lnkAbrirOriginal.href = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(visor.ruta)}&archivo=${encodeURIComponent(visor.archivo)}`);
 
@@ -1649,6 +1796,26 @@ function pct($n, $d): int {
   }
 
   if (swBoxes) swBoxes.addEventListener('change', drawCanvas);
+
+  if (btnVisorAbrirCarpeta) {
+    btnVisorAbrirCarpeta.addEventListener('click', (e) => {
+      e.preventDefault();
+      const folderPath = (visor.ruta || '').trim() || (visor.rutaRelativa || '').replace(/\/[^/]+$/, '').trim();
+      if (!folderPath) return;
+      const parts = folderPath.split('/').filter(Boolean);
+      const folderName = parts.length ? parts[parts.length - 1] : folderPath;
+      const rutaRelativa = visor.rutaRelativa;
+      if (window.jQuery) {
+        window.jQuery('#modalVisor').one('hidden.bs.modal', () => {
+          abrirCarpetaStacked(folderName, folderPath, rutaRelativa);
+        });
+        window.jQuery('#modalVisor').modal('hide');
+      } else {
+        abrirCarpetaStacked(folderName, folderPath, rutaRelativa);
+      }
+    });
+  }
+
   if (window.jQuery) {
     window.jQuery('#modalVisor').on('shown.bs.modal', () => drawCanvas());
   }
