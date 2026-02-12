@@ -650,10 +650,12 @@ $__patronDisplay = preg_replace('/\.ext\s*$/i', '', trim((string)($values['PATRO
     if (ok && data.ok) {
       okState.schema = true;
       const cols = Array.isArray(data.common_columns) ? data.common_columns : [];
-      fillSelectOptions('PRIMARY_KEY', cols);
+      const colsAuto = Array.isArray(data.common_columns_autoincrement) ? data.common_columns_autoincrement : [];
+      const colsTimestamp = Array.isArray(data.common_columns_timestamp) ? data.common_columns_timestamp : [];
+      fillSelectOptions('PRIMARY_KEY', colsAuto.length ? colsAuto : cols);
       fillSelectOptions('CAMPO_IDENTIFICADOR', cols);
       fillSelectOptions('CAMPO_USR_ID', cols);
-      fillSelectOptions('CAMPO_FECHA', cols);
+      fillSelectOptions('CAMPO_FECHA', colsTimestamp.length ? colsTimestamp : cols);
       fillSelectOptions('CAMPO_RESULTADO', cols);
       renderImgCols(cols);
       await autosaveSection('schema');
@@ -696,10 +698,12 @@ $__patronDisplay = preg_replace('/\.ext\s*$/i', '', trim((string)($values['PATRO
     const { ok, data } = await postJson('setup_test_schema', getPayload());
     if (ok && data.ok && Array.isArray(data.common_columns)) {
       const cols = data.common_columns;
-      fillSelectOptions('PRIMARY_KEY', cols);
+      const colsAuto = Array.isArray(data.common_columns_autoincrement) ? data.common_columns_autoincrement : [];
+      const colsTimestamp = Array.isArray(data.common_columns_timestamp) ? data.common_columns_timestamp : [];
+      fillSelectOptions('PRIMARY_KEY', colsAuto.length ? colsAuto : cols);
       fillSelectOptions('CAMPO_IDENTIFICADOR', cols);
       fillSelectOptions('CAMPO_USR_ID', cols);
-      fillSelectOptions('CAMPO_FECHA', cols);
+      fillSelectOptions('CAMPO_FECHA', colsTimestamp.length ? colsTimestamp : cols);
       fillSelectOptions('CAMPO_RESULTADO', cols);
       renderImgCols(cols);
       okState.schema = true;
