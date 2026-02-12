@@ -437,6 +437,28 @@ class SetupController extends BaseController
         return $cols;
     }
 
+    /**
+     * Devuelve columnas de una tabla con metadata: DATA_TYPE y EXTRA (para auto_increment).
+     * @return array<string, array{data_type: string, extra: string}> key = nombre columna en minúsculas
+     */
+    private function columnasConMetadataDeTabla(PDO $pdo, string $dbName, string $tabla): array
+    {
+        $sql = "SELECT COLUMN_NAME, DATA_TYPE, EXTRA
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :t";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([':db' => $dbName, ':t' => $tabla]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $name = strtolower((string)$r['COLUMN_NAME']);
+            $out[$name] = [
+                'data_type' => strtolower((string)($r['DATA_TYPE'] ?? '')),
+                'extra' => strtolower((string)($r['EXTRA'] ?? '')),
+            ];
+        }
+        return $out;
+    }
+
     private function probarSchemaYTablas(PDO $pdo, array $cfg): array
     {
         foreach (['DB_NAME', 'TABLE_PATTERN'] as $k) {
@@ -455,6 +477,25 @@ class SetupController extends BaseController
             $commonSorted = $common;
             sort($commonSorted, SORT_NATURAL | SORT_FLAG_CASE);
 
+            // Metadata de la primera tabla para segmentar PRIMARY_KEY (autoincrement) y CAMPO_FECHA (timestamp)
+            $meta = $this->columnasConMetadataDeTabla($pdo, $cfg['DB_NAME'], $tablas[0]);
+            $autoincrement = [];
+            $timestamp = [];
+            foreach ($commonSorted as $col) {
+                $key = strtolower($col);
+                $m = $meta[$key] ?? null;
+                if ($m !== null) {
+                    if (str_contains($m['extra'], 'auto_increment')) {
+                        $autoincrement[] = $col;
+                    }
+                    if (in_array($m['data_type'], ['timestamp', 'datetime', 'date'], true)) {
+                        $timestamp[] = $col;
+                    }
+                }
+            }
+            sort($autoincrement, SORT_NATURAL | SORT_FLAG_CASE);
+            sort($timestamp, SORT_NATURAL | SORT_FLAG_CASE);
+
             return [
                 'success' => true,
                 'ok' => true,
@@ -462,7 +503,9 @@ class SetupController extends BaseController
                 'mensaje' => 'Tablas OK (columnas comunes calculadas)',
                 'total_tablas' => count($tablas),
                 'tabla_muestra' => $tablas[0],
-                'common_columns' => $commonSorted
+                'common_columns' => $commonSorted,
+                'common_columns_autoincrement' => $autoincrement,
+                'common_columns_timestamp' => $timestamp,
             ];
         } catch (\Throwable $e) {
             return ['success' => true, 'ok' => false, 'module' => 'schema', 'error' => $e->getMessage()];
