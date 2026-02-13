@@ -47,6 +47,33 @@
       : url;
   }
 
+  /** Carga el thumb por fetch; si el servidor envió X-Thumb-New: 1 (thumb recién generado), añade badge "Nuevo". */
+  async function loadThumbWithNewBadge(img, thumbUrl, card) {
+    if (!img || !thumbUrl) return;
+    try {
+      const response = await fetch(thumbUrl, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok) {
+        img.src = thumbUrl;
+        return;
+      }
+      const isNew = response.headers.get('X-Thumb-New') === '1';
+      if (isNew && card) {
+        const wrap = card.querySelector('.thumb-card-img');
+        if (wrap) {
+          const badge = document.createElement('span');
+          badge.className = 'thumb-badge-new';
+          badge.setAttribute('aria-label', 'Thumbnail recién generado');
+          badge.textContent = 'Nuevo';
+          wrap.appendChild(badge);
+        }
+      }
+      const blob = await response.blob();
+      img.src = URL.createObjectURL(blob);
+    } catch (e) {
+      img.src = thumbUrl;
+    }
+  }
+
   function fileMatchesFilter(f) {
     if (folderFilter === 'ALL') return true;
     if (folderFilter === 'PENDIENTE') return !!f?.pendiente;
@@ -126,7 +153,7 @@
       const img = document.createElement('img');
       img.alt = nombre;
       img.loading = 'lazy';
-      img.src = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(lastFolder?.ruta || '') + '&archivo=' + encodeURIComponent(nombre) + '&thumb=1&w=240', ws);
+      const thumbUrl = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(lastFolder?.ruta || '') + '&archivo=' + encodeURIComponent(nombre) + '&thumb=1&w=240', ws);
       imgWrap.appendChild(img);
       a.appendChild(imgWrap);
       const body = document.createElement('div');
@@ -161,6 +188,7 @@
       card.appendChild(a);
       col.appendChild(card);
       gridThumbs.appendChild(col);
+      loadThumbWithNewBadge(img, thumbUrl, card);
     }
   }
 
@@ -199,7 +227,7 @@
       const img = document.createElement('img');
       img.alt = nombre;
       img.loading = 'lazy';
-      img.src = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(rutaCarpeta) + '&archivo=' + encodeURIComponent(nombre) + '&thumb=1&w=240', ws);
+      const thumbUrlStacked = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(rutaCarpeta) + '&archivo=' + encodeURIComponent(nombre) + '&thumb=1&w=240', ws);
       imgWrap.appendChild(img);
       a.appendChild(imgWrap);
       const body = document.createElement('div');
@@ -234,6 +262,7 @@
       card.appendChild(a);
       col.appendChild(card);
       gridThumbsStacked.appendChild(col);
+      loadThumbWithNewBadge(img, thumbUrlStacked, card);
     }
   }
 
@@ -521,7 +550,7 @@
       const img = document.createElement('img');
       img.alt = archivo;
       img.loading = 'lazy';
-      img.src = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(rutaCarpeta) + '&archivo=' + encodeURIComponent(archivo) + '&thumb=1&w=240', ws);
+      const thumbUrlResultados = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(rutaCarpeta) + '&archivo=' + encodeURIComponent(archivo) + '&thumb=1&w=240', ws);
       imgWrap.appendChild(img);
       a.appendChild(imgWrap);
       const body = document.createElement('div');
@@ -539,8 +568,17 @@
       card.appendChild(a);
       col.appendChild(card);
       gridThumbs.appendChild(col);
+      loadThumbWithNewBadge(img, thumbUrlResultados, card);
     }
     showModal(cfg.refs.modalCarpeta);
+  }
+
+  function moveFocusOutOfModal(modalEl) {
+    if (!modalEl) return;
+    var active = document.activeElement;
+    if (active && modalEl.contains(active)) {
+      active.blur();
+    }
   }
 
   const BuscadorModals = {
@@ -549,13 +587,21 @@
       if (!cfg?.refs) return;
       wireVisorIrACarpeta();
       wireVisorShownAndResize();
+      [cfg.refs.modalCarpeta, cfg.refs.modalCarpetaStacked, cfg.refs.modalVisor].forEach(function (modal) {
+        if (modal && typeof modal.addEventListener === 'function') {
+          modal.addEventListener('hide.bs.modal', function () {
+            moveFocusOutOfModal(modal);
+          });
+        }
+      });
     },
     openFolder: openFolder,
     openVisor: openVisor,
     openFolderStacked: openFolderStacked,
     openGalleryResultados: openGalleryResultados,
     drawCanvas: drawCanvas,
-    getVisor: function () { return visor; }
+    getVisor: function () { return visor; },
+    loadThumbWithNewBadge: loadThumbWithNewBadge
   };
 
   if (typeof window !== 'undefined') window.BuscadorModals = BuscadorModals;

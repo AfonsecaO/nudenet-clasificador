@@ -1178,7 +1178,7 @@ function pct($n, $d): int {
       const img = document.createElement('img');
       img.alt = archivo;
       img.loading = 'lazy';
-      img.src = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(rutaCarpeta)}&archivo=${encodeURIComponent(archivo)}&thumb=1&w=240`);
+      const thumbUrlEtiq = appendWorkspace(`?action=ver_imagen&ruta=${encodeURIComponent(rutaCarpeta)}&archivo=${encodeURIComponent(archivo)}&thumb=1&w=240`);
       imgWrap.appendChild(img);
       a.appendChild(imgWrap);
       const body = document.createElement('div');
@@ -1213,6 +1213,11 @@ function pct($n, $d): int {
       card.appendChild(a);
       col.appendChild(card);
       gridThumbs.appendChild(col);
+      if (window.BuscadorModals && typeof window.BuscadorModals.loadThumbWithNewBadge === 'function') {
+        window.BuscadorModals.loadThumbWithNewBadge(img, thumbUrlEtiq, card);
+      } else {
+        img.src = thumbUrlEtiq;
+      }
     }
   }
 
