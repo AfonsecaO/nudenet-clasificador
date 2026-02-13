@@ -691,6 +691,7 @@ class ImagenesIndex
                 'max' => (int)round($maxScore * 100),
             ];
         }
+        usort($out, fn($a, $b) => ($b['max'] <=> $a['max']) ?: ($b['count'] <=> $a['count']) ?: strcmp($a['label'], $b['label']));
         return $out;
     }
 

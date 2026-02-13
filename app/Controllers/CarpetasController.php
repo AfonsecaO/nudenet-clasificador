@@ -81,7 +81,11 @@ class CarpetasController extends BaseController
         return null;
     }
 
-    private function outputFile(string $path, string $contentType, bool $isThumb = false): void
+    /**
+     * @param bool $isThumb Si es thumbnail de galería
+     * @param bool|null $thumbFromCache Si es thumb: true = servido desde caché, false = recién generado (para cabecera X-Thumb-Cached)
+     */
+    private function outputFile(string $path, string $contentType, bool $isThumb = false, ?bool $thumbFromCache = null): void
     {
         if (!is_file($path)) {
             http_response_code(404);
@@ -91,6 +95,10 @@ class CarpetasController extends BaseController
         header('Content-Length: ' . filesize($path));
         if ($isThumb) {
             header('Cache-Control: public, max-age=31536000, immutable');
+            if ($thumbFromCache === false) {
+                header('X-Thumb-New: 1');
+                header('Access-Control-Expose-Headers: X-Thumb-New');
+            }
         }
         readfile($path);
         exit;
@@ -388,6 +396,9 @@ class CarpetasController extends BaseController
                 }, $carpetas);
                 $items = $this->enriquecerCarpetasConTags($items);
                 usort($items, function ($a, $b) {
+                    $ta = (int)($a['total_archivos'] ?? 0);
+                    $tb = (int)($b['total_archivos'] ?? 0);
+                    if ($tb !== $ta) return $tb <=> $ta;
                     return strcmp((string)($a['ruta'] ?? ''), (string)($b['ruta'] ?? ''));
                 });
                 $this->jsonResponse([
@@ -428,6 +439,9 @@ class CarpetasController extends BaseController
             }, $carpetas);
             $items = $this->enriquecerCarpetasConTags($items);
             usort($items, function ($a, $b) {
+                $ta = (int)($a['total_archivos'] ?? 0);
+                $tb = (int)($b['total_archivos'] ?? 0);
+                if ($tb !== $ta) return $tb <=> $ta;
                 return strcmp((string)($a['ruta'] ?? ''), (string)($b['ruta'] ?? ''));
             });
 
@@ -623,17 +637,30 @@ class CarpetasController extends BaseController
                 $size = is_array($st) ? (int)($st['size'] ?? 0) : 0;
                 $key = sha1($real . '|' . $mtime . '|' . $size . '|' . $w . '|thumb_v1');
 
-                $thumbsDir = WorkspaceService::paths($ws)['thumbsDir'] ?? $this->workspacePath('thumbs');
+                $paths = WorkspaceService::paths($ws);
+                $thumbsDir = $paths['thumbsDir'] ?? $this->workspacePath('thumbs');
+                $cacheDirParent = $paths['cacheDir'] ?? dirname($thumbsDir);
                 $cacheDir = $thumbsDir;
+                $this->ensureDir($cacheDirParent);
                 $this->ensureDir($cacheDir);
+                if (!is_dir($cacheDir) || !is_writable($cacheDir)) {
+                    \App\Services\WorkspaceService::ensureStructure($ws);
+                    clearstatcache(true, $cacheDir);
+                }
+                $cacheDirResolved = realpath($cacheDir);
+                if ($cacheDirResolved === false) {
+                    $cacheDirResolved = rtrim($cacheDir, "/\\");
+                }
 
                 $useWebp = function_exists('imagewebp');
                 $extOut = $useWebp ? 'webp' : 'jpg';
                 $contentType = $useWebp ? 'image/webp' : 'image/jpeg';
-                $cachePath = rtrim($cacheDir, "/\\") . DIRECTORY_SEPARATOR . $key . '.' . $extOut;
+                $cachePath = $cacheDirResolved . DIRECTORY_SEPARATOR . $key . '.' . $extOut;
+                $forceRegenerate = isset($_GET['force']) && ($_GET['force'] === '1' || $_GET['force'] === 1);
 
-                if (is_file($cachePath)) {
-                    $this->outputFile($cachePath, $contentType, true);
+                if (!$forceRegenerate && is_file($cachePath)) {
+                    header('X-Thumb-Workspace: ' . $ws);
+                    $this->outputFile($cachePath, $contentType, true, true);
                 }
 
                 // Generar thumb (si GD no está disponible, devolver original como fallback)
@@ -691,13 +718,27 @@ class CarpetasController extends BaseController
                             imagedestroy($dst);
 
                             if ($okWrite) {
-                                // Move atómico
-                                @rename($tmpPath, $cachePath);
-                                if (is_file($cachePath)) {
-                                    $this->outputFile($cachePath, $contentType, true);
+                                $moved = @rename($tmpPath, $cachePath);
+                                if (!$moved && is_file($tmpPath)) {
+                                    $moved = @copy($tmpPath, $cachePath);
+                                    if ($moved) @unlink($tmpPath);
                                 }
+                                if ($moved && is_file($cachePath)) {
+                                    header('X-Thumb-Workspace: ' . $ws);
+                                    $this->outputFile($cachePath, $contentType, true, false);
+                                } else {
+                                    header('X-Thumb-Debug: write-failed');
+                                    $mimeFallback = $mimeIn ?? (pathinfo($archivo, PATHINFO_EXTENSION) === 'png' ? 'image/png' : 'image/jpeg');
+                                    $this->outputFile($rutaCompleta, $mimeFallback, false);
+                                    return;
+                                }
+                                if (file_exists($tmpPath)) @unlink($tmpPath);
                             } else {
-                                @unlink($tmpPath);
+                                if (file_exists($tmpPath)) @unlink($tmpPath);
+                                header('X-Thumb-Debug: generate-failed');
+                                $mimeFallback = $mimeIn ?? (pathinfo($archivo, PATHINFO_EXTENSION) === 'png' ? 'image/png' : 'image/jpeg');
+                                $this->outputFile($rutaCompleta, $mimeFallback, false);
+                                return;
                             }
                         } else {
                             imagedestroy($im);

@@ -1922,10 +1922,28 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 
 .thumb-card a { text-decoration: none; color: inherit; display: flex; flex-direction: column; height: 100%; }
 .thumb-card-img {
+  position: relative;
   aspect-ratio: 1;
   background: var(--soft-3-bg);
   overflow: hidden;
   flex-shrink: 0;
+}
+.thumb-badge-new {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 0.28rem 0.5rem;
+  border-radius: 4px;
+  background: #16a34a;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  z-index: 2;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.5);
 }
 .thumb-card-img img {
   width: 100%;

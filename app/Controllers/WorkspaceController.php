@@ -232,7 +232,7 @@ class WorkspaceController extends BaseController
                 }
                 try {
                     if ($searchKey === '') {
-                        $rows = $pdo->query('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM folders ORDER BY ruta_carpeta ASC LIMIT ' . self::LIMIT_CARPETAS_POR_WS)->fetchAll();
+                        $rows = $pdo->query('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM folders ORDER BY total_imagenes DESC, ruta_carpeta ASC LIMIT ' . self::LIMIT_CARPETAS_POR_WS)->fetchAll();
                     } else {
                         $stmt = $pdo->prepare("
                             SELECT ruta_carpeta as ruta, nombre, total_imagenes
@@ -320,6 +320,8 @@ class WorkspaceController extends BaseController
                 }
             }
 
+            usort($carpetas, fn($a, $b) => ($b['total_archivos'] <=> $a['total_archivos']) ?: strcmp((string)($a['ruta'] ?? ''), (string)($b['ruta'] ?? '')));
+
             $this->jsonResponse([
                 'success' => true,
                 'carpetas' => $carpetas,
@@ -373,7 +375,7 @@ class WorkspaceController extends BaseController
             }
 
             $etiquetas = array_values($byLabel);
-            usort($etiquetas, fn($a, $b) => ($b['count'] <=> $a['count']) ?: strcmp($a['label'], $b['label']));
+            usort($etiquetas, fn($a, $b) => ($b['max'] <=> $a['max']) ?: ($b['count'] <=> $a['count']) ?: strcmp($a['label'], $b['label']));
 
             $this->jsonResponse([
                 'success' => true,
