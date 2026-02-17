@@ -47,13 +47,30 @@
       : url;
   }
 
-  /** Carga el thumb por fetch; si el servidor envió X-Thumb-New: 1 (thumb recién generado), añade badge "Nuevo". */
+  function createThumbLoader() {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb-loader';
+    wrap.setAttribute('aria-hidden', 'true');
+    wrap.innerHTML = '<span class="thumb-loader-spinner"></span>';
+    return wrap;
+  }
+
+  function removeThumbLoader(card) {
+    const loader = card ? card.querySelector('.thumb-loader') : null;
+    if (loader) loader.remove();
+  }
+
+  /** Carga el thumb por fetch; si el servidor envió X-Thumb-New: 1, añade badge "Nuevo". Al terminar quita el loader. */
   async function loadThumbWithNewBadge(img, thumbUrl, card) {
-    if (!img || !thumbUrl) return;
+    if (!img || !thumbUrl) {
+      removeThumbLoader(card);
+      return;
+    }
     try {
       const response = await fetch(thumbUrl, { credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok) {
         img.src = thumbUrl;
+        removeThumbLoader(card);
         return;
       }
       const isNew = response.headers.get('X-Thumb-New') === '1';
@@ -71,7 +88,44 @@
       img.src = URL.createObjectURL(blob);
     } catch (e) {
       img.src = thumbUrl;
+    } finally {
+      removeThumbLoader(card);
     }
+  }
+
+  var thumbObserver = null;
+  function getThumbObserver() {
+    if (thumbObserver) return thumbObserver;
+    thumbObserver = new IntersectionObserver(
+      function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          var ent = entries[i];
+          if (!ent.isIntersecting) continue;
+          var col = ent.target;
+          thumbObserver.unobserve(col);
+          var url = col.dataset.thumbUrl;
+          if (!url) continue;
+          col.dataset.thumbUrl = '';
+          var card = col.querySelector('.thumb-card');
+          var img = col.querySelector('.thumb-card-img img');
+          if (card && img) loadThumbWithNewBadge(img, url, card);
+        }
+      },
+      { root: null, rootMargin: '100px', threshold: 0.01 }
+    );
+    return thumbObserver;
+  }
+
+  /** Programa la carga del thumb cuando la celda entre en viewport (scroll). Muestra loader hasta que cargue. */
+  function scheduleThumbLoad(col, card, img, thumbUrl) {
+    if (!col || !thumbUrl) return;
+    var wrap = card ? card.querySelector('.thumb-card-img') : null;
+    if (wrap) {
+      var loader = createThumbLoader();
+      wrap.insertBefore(loader, wrap.firstChild);
+    }
+    col.dataset.thumbUrl = thumbUrl;
+    getThumbObserver().observe(col);
   }
 
   function fileMatchesFilter(f) {
@@ -188,7 +242,7 @@
       card.appendChild(a);
       col.appendChild(card);
       gridThumbs.appendChild(col);
-      loadThumbWithNewBadge(img, thumbUrl, card);
+      scheduleThumbLoad(col, card, img, thumbUrl);
     }
   }
 
@@ -262,7 +316,7 @@
       card.appendChild(a);
       col.appendChild(card);
       gridThumbsStacked.appendChild(col);
-      loadThumbWithNewBadge(img, thumbUrlStacked, card);
+      scheduleThumbLoad(col, card, img, thumbUrlStacked);
     }
   }
 
@@ -568,7 +622,7 @@
       card.appendChild(a);
       col.appendChild(card);
       gridThumbs.appendChild(col);
-      loadThumbWithNewBadge(img, thumbUrlResultados, card);
+      scheduleThumbLoad(col, card, img, thumbUrlResultados);
     }
     showModal(cfg.refs.modalCarpeta);
   }
@@ -601,7 +655,10 @@
     openGalleryResultados: openGalleryResultados,
     drawCanvas: drawCanvas,
     getVisor: function () { return visor; },
-    loadThumbWithNewBadge: loadThumbWithNewBadge
+    loadThumbWithNewBadge: loadThumbWithNewBadge,
+    scheduleThumbLoad: scheduleThumbLoad,
+    createThumbLoader: createThumbLoader,
+    removeThumbLoader: removeThumbLoader
   };
 
   if (typeof window !== 'undefined') window.BuscadorModals = BuscadorModals;

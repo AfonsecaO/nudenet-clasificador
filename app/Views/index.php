@@ -1213,7 +1213,9 @@ function pct($n, $d): int {
       card.appendChild(a);
       col.appendChild(card);
       gridThumbs.appendChild(col);
-      if (window.BuscadorModals && typeof window.BuscadorModals.loadThumbWithNewBadge === 'function') {
+      if (window.BuscadorModals && typeof window.BuscadorModals.scheduleThumbLoad === 'function') {
+        window.BuscadorModals.scheduleThumbLoad(col, card, img, thumbUrlEtiq);
+      } else if (window.BuscadorModals && typeof window.BuscadorModals.loadThumbWithNewBadge === 'function') {
         window.BuscadorModals.loadThumbWithNewBadge(img, thumbUrlEtiq, card);
       } else {
         img.src = thumbUrlEtiq;
