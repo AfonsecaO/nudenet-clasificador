@@ -1928,6 +1928,26 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   overflow: hidden;
   flex-shrink: 0;
 }
+.thumb-loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--soft-3-bg);
+  z-index: 1;
+}
+.thumb-loader-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary, #0d6efd);
+  border-radius: 50%;
+  animation: thumb-loader-spin 0.7s linear infinite;
+}
+@keyframes thumb-loader-spin {
+  to { transform: rotate(360deg); }
+}
 .thumb-badge-new {
   position: absolute;
   top: 0.4rem;
