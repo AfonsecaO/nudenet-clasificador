@@ -295,7 +295,6 @@ class ImagenesController extends BaseController
             $body2 = curl_exec($ch2);
             $curlErr2 = curl_error($ch2);
             $httpCode2 = (int)curl_getinfo($ch2, CURLINFO_HTTP_CODE);
-            curl_close($ch2);
 
             if ($body2 === false || $curlErr2) {
                 $detectOk = false;
