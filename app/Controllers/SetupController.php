@@ -601,7 +601,6 @@ class SetupController extends BaseController
             $body = curl_exec($ch);
             $curlErr = curl_error($ch);
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
 
             if ($body === false || $curlErr) {
                 return ['success' => true, 'ok' => false, 'module' => 'clasificador', 'error' => ($curlErr ?: 'Error desconocido'), 'http_code' => $httpCode];
