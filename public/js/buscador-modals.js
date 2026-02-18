@@ -60,60 +60,86 @@
     if (loader) loader.remove();
   }
 
-  /** Carga el thumb por fetch; si el servidor envió X-Thumb-New: 1, añade badge "Nuevo". Al terminar quita el loader. */
-  async function loadThumbWithNewBadge(img, thumbUrl, card) {
+  /** Carga el thumb por URL directa (sin fetch/blob). Reintentos escalonados si falla. */
+  function loadThumbWithNewBadge(img, thumbUrl, card) {
     if (!img || !thumbUrl) {
       removeThumbLoader(card);
       return;
     }
-    try {
-      const response = await fetch(thumbUrl, { credentials: 'same-origin', cache: 'no-store' });
-      if (!response.ok) {
-        img.src = thumbUrl;
-        removeThumbLoader(card);
-        return;
+    removeThumbLoader(card);
+    img.loading = 'eager';
+    var sep = thumbUrl.indexOf('?') >= 0 ? '&' : '?';
+    function setSrc() {
+      img.src = thumbUrl + sep + '_=' + Date.now();
+    }
+    var retries = 0;
+    var maxRetries = 3;
+    img.onerror = function () {
+      img.onerror = null;
+      if (retries < maxRetries) {
+        retries++;
+        var delay = retries === 1 ? 200 : (retries === 2 ? 500 : 900);
+        setTimeout(setSrc, delay);
       }
-      const isNew = response.headers.get('X-Thumb-New') === '1';
-      if (isNew && card) {
-        const wrap = card.querySelector('.thumb-card-img');
-        if (wrap) {
-          const badge = document.createElement('span');
-          badge.className = 'thumb-badge-new';
-          badge.setAttribute('aria-label', 'Thumbnail recién generado');
-          badge.textContent = 'Nuevo';
-          wrap.appendChild(badge);
-        }
-      }
-      const blob = await response.blob();
-      img.src = URL.createObjectURL(blob);
-    } catch (e) {
-      img.src = thumbUrl;
-    } finally {
-      removeThumbLoader(card);
+    };
+    setSrc();
+  }
+
+  var THUMB_SCROLL_DELAY_MS = 120;
+  var thumbObserverViewport = null;
+  var thumbObserverByRoot = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+  var thumbDebounceViewport = { queue: [], timer: null };
+  var thumbDebounceByRoot = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+
+  var THUMB_STAGGER_MS = 60;
+  function flushThumbQueue(state) {
+    if (!state || !state.queue.length) return;
+    var list = state.queue;
+    state.queue = [];
+    for (var i = 0; i < list.length; i++) {
+      (function (item, index) {
+        setTimeout(function () {
+          if (item.card && item.img && item.url) loadThumbWithNewBadge(item.img, item.url, item.card);
+        }, index * THUMB_STAGGER_MS);
+      })(list[i], i);
     }
   }
 
-  var thumbObserver = null;
-  function getThumbObserver() {
-    if (thumbObserver) return thumbObserver;
-    thumbObserver = new IntersectionObserver(
+  function getThumbObserver(root) {
+    if (root && thumbObserverByRoot && thumbObserverByRoot.has(root)) return thumbObserverByRoot.get(root);
+    if (!root && thumbObserverViewport) return thumbObserverViewport;
+    var state = root ? (thumbDebounceByRoot && thumbDebounceByRoot.get(root)) : thumbDebounceViewport;
+    if (!state) {
+      state = { queue: [], timer: null };
+      if (root && thumbDebounceByRoot) thumbDebounceByRoot.set(root, state);
+    }
+    var obs = new IntersectionObserver(
       function (entries) {
         for (var i = 0; i < entries.length; i++) {
           var ent = entries[i];
           if (!ent.isIntersecting) continue;
           var col = ent.target;
-          thumbObserver.unobserve(col);
+          obs.unobserve(col);
           var url = col.dataset.thumbUrl;
           if (!url) continue;
           col.dataset.thumbUrl = '';
           var card = col.querySelector('.thumb-card');
           var img = col.querySelector('.thumb-card-img img');
-          if (card && img) loadThumbWithNewBadge(img, url, card);
+          if (card && img) {
+            state.queue.push({ col: col, url: url, card: card, img: img });
+            if (state.timer) clearTimeout(state.timer);
+            state.timer = setTimeout(function () {
+              state.timer = null;
+              flushThumbQueue(state);
+            }, THUMB_SCROLL_DELAY_MS);
+          }
         }
       },
-      { root: null, rootMargin: '100px', threshold: 0.01 }
+      { root: root || null, rootMargin: '120px', threshold: 0.01 }
     );
-    return thumbObserver;
+    if (root && thumbObserverByRoot) thumbObserverByRoot.set(root, obs);
+    else thumbObserverViewport = obs;
+    return obs;
   }
 
   /** Programa la carga del thumb cuando la celda entre en viewport (scroll). Muestra loader hasta que cargue. */
@@ -125,7 +151,8 @@
       wrap.insertBefore(loader, wrap.firstChild);
     }
     col.dataset.thumbUrl = thumbUrl;
-    getThumbObserver().observe(col);
+    var scrollRoot = col.closest('.modal-body') || col.closest('.modal-dialog-scrollable') || null;
+    getThumbObserver(scrollRoot).observe(col);
   }
 
   function fileMatchesFilter(f) {

@@ -659,9 +659,35 @@ class CarpetasController extends BaseController
                 $forceRegenerate = isset($_GET['force']) && ($_GET['force'] === '1' || $_GET['force'] === 1);
 
                 if (!$forceRegenerate && is_file($cachePath)) {
-                    header('X-Thumb-Workspace: ' . $ws);
-                    $this->outputFile($cachePath, $contentType, true, true);
+                    if (filesize($cachePath) > 0) {
+                        header('X-Thumb-Workspace: ' . $ws);
+                        $this->outputFile($cachePath, $contentType, true, true);
+                        return;
+                    }
+                    @unlink($cachePath);
                 }
+
+                $lockPath = $cachePath . '.lock';
+                $lockFp = @fopen($lockPath, 'c');
+                if ($lockFp && flock($lockFp, LOCK_EX)) {
+                    clearstatcache(true, $cachePath);
+                    if (!$forceRegenerate && is_file($cachePath) && filesize($cachePath) > 0) {
+                        flock($lockFp, LOCK_UN);
+                        fclose($lockFp);
+                        @unlink($lockPath);
+                        header('X-Thumb-Workspace: ' . $ws);
+                        $this->outputFile($cachePath, $contentType, true, true);
+                        return;
+                    }
+                }
+                $releaseLock = function () use (&$lockFp, $lockPath) {
+                    if ($lockFp) {
+                        @flock($lockFp, LOCK_UN);
+                        @fclose($lockFp);
+                        @unlink($lockPath);
+                        $lockFp = null;
+                    }
+                };
 
                 // Generar thumb (si GD no está disponible, devolver original como fallback)
                 if (!function_exists('imagecreatetruecolor') || !function_exists('imagecopyresampled')) {
@@ -698,55 +724,64 @@ class CarpetasController extends BaseController
                             imagecopyresampled($dst, $im, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
 
                             $tmpPath = $cachePath . '.tmp';
-                            $okWrite = false;
-                            if ($useWebp) {
-                                $okWrite = @imagewebp($dst, $tmpPath, 70);
-                            } else {
-                                // JPEG: fondo blanco si hay alpha
-                                if ($isAlpha) {
-                                    $dst2 = imagecreatetruecolor($dstW, $dstH);
-                                    $white = imagecolorallocate($dst2, 255, 255, 255);
-                                    imagefilledrectangle($dst2, 0, 0, $dstW - 1, $dstH - 1, $white);
-                                    imagecopy($dst2, $dst, 0, 0, 0, 0, $dstW, $dstH);
-                                    imagedestroy($dst);
-                                    $dst = $dst2;
-                                }
-                                $okWrite = @imagejpeg($dst, $tmpPath, 70);
-                            }
-
-                            imagedestroy($im);
-                            imagedestroy($dst);
-
-                            if ($okWrite) {
-                                $moved = @rename($tmpPath, $cachePath);
-                                if (!$moved && is_file($tmpPath)) {
-                                    $moved = @copy($tmpPath, $cachePath);
-                                    if ($moved) @unlink($tmpPath);
-                                }
-                                if ($moved && is_file($cachePath)) {
-                                    header('X-Thumb-Workspace: ' . $ws);
-                                    $this->outputFile($cachePath, $contentType, true, false);
+                            $thumbData = null;
+                            $memStream = @fopen('php://temp', 'r+');
+                            if ($memStream !== false) {
+                                $okWrite = false;
+                                if ($useWebp) {
+                                    $okWrite = @imagewebp($dst, $memStream, 70);
                                 } else {
-                                    header('X-Thumb-Debug: write-failed');
-                                    $mimeFallback = $mimeIn ?? (pathinfo($archivo, PATHINFO_EXTENSION) === 'png' ? 'image/png' : 'image/jpeg');
-                                    $this->outputFile($rutaCompleta, $mimeFallback, false);
-                                    return;
+                                    if ($isAlpha) {
+                                        $dst2 = imagecreatetruecolor($dstW, $dstH);
+                                        $white = imagecolorallocate($dst2, 255, 255, 255);
+                                        imagefilledrectangle($dst2, 0, 0, $dstW - 1, $dstH - 1, $white);
+                                        imagecopy($dst2, $dst, 0, 0, 0, 0, $dstW, $dstH);
+                                        imagedestroy($dst);
+                                        $dst = $dst2;
+                                    }
+                                    $okWrite = @imagejpeg($dst, $memStream, 70);
                                 }
-                                if (file_exists($tmpPath)) @unlink($tmpPath);
+                                imagedestroy($im);
+                                imagedestroy($dst);
+                                if ($okWrite) {
+                                    rewind($memStream);
+                                    $thumbData = stream_get_contents($memStream);
+                                }
+                                fclose($memStream);
                             } else {
-                                if (file_exists($tmpPath)) @unlink($tmpPath);
-                                header('X-Thumb-Debug: generate-failed');
-                                $mimeFallback = $mimeIn ?? (pathinfo($archivo, PATHINFO_EXTENSION) === 'png' ? 'image/png' : 'image/jpeg');
-                                $this->outputFile($rutaCompleta, $mimeFallback, false);
-                                return;
+                                imagedestroy($im);
+                                if (isset($dst)) imagedestroy($dst);
                             }
+
+                            if ($thumbData !== null && strlen($thumbData) > 0) {
+                                @file_put_contents($cachePath, $thumbData, LOCK_EX);
+                                $releaseLock();
+                                while (ob_get_level()) {
+                                    ob_end_clean();
+                                }
+                                header('X-Thumb-Workspace: ' . $ws);
+                                header('Content-Type: ' . $contentType);
+                                header('Content-Length: ' . strlen($thumbData));
+                                header('Cache-Control: public, max-age=31536000, immutable');
+                                header('X-Thumb-New: 1');
+                                header('Access-Control-Expose-Headers: X-Thumb-New');
+                                echo $thumbData;
+                                exit;
+                            }
+                            $releaseLock();
+                            header('X-Thumb-Debug: generate-failed');
+                            $mimeFallback = $mimeIn ?? (pathinfo($archivo, PATHINFO_EXTENSION) === 'png' ? 'image/png' : 'image/jpeg');
+                            $this->outputFile($rutaCompleta, $mimeFallback, false);
+                            return;
                         } else {
                             imagedestroy($im);
                         }
                     }
+                    $releaseLock();
                 }
+                $releaseLock();
             }
-            
+
             // Obtener el tipo MIME
             $mimeType = null;
             if (function_exists('finfo_open')) {
