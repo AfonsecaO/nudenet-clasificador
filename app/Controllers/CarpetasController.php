@@ -97,7 +97,10 @@ class CarpetasController extends BaseController
             header('Cache-Control: public, max-age=31536000, immutable');
             if ($thumbFromCache === false) {
                 header('X-Thumb-New: 1');
-                header('Access-Control-Expose-Headers: X-Thumb-New');
+                header('Access-Control-Expose-Headers: X-Thumb-New, X-Thumb-Cached');
+            } elseif ($thumbFromCache === true) {
+                header('X-Thumb-Cached: 1');
+                header('Access-Control-Expose-Headers: X-Thumb-New, X-Thumb-Cached');
             }
         }
         readfile($path);
@@ -125,25 +128,54 @@ class CarpetasController extends BaseController
 
         $ph = implode(',', array_fill(0, count($rutas), '?'));
 
-        // Tags por carpeta (conteo por imágenes distintas)
-        $stmtTags = $pdo->prepare("
-            SELECT i.ruta_carpeta as ruta, d.label as label, COUNT(DISTINCT i.ruta_relativa) as c
-            FROM {$tImg} i
-            JOIN {$tDet} d ON d.image_ruta_relativa = i.ruta_relativa
-            WHERE COALESCE(i.ruta_carpeta,'') IN ($ph)
-            GROUP BY i.ruta_carpeta, d.label
+        // Imágenes: ruta_relativa, ruta_carpeta para las carpetas
+        $stmtImg = $pdo->prepare("
+            SELECT ruta_relativa, ruta_carpeta
+            FROM {$tImg}
+            WHERE COALESCE(ruta_carpeta,'') IN ($ph)
         ");
-        $stmtTags->execute($rutas);
-        $rowsTags = $stmtTags->fetchAll() ?: [];
+        $stmtImg->execute($rutas);
+        $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rutaToCarpeta = [];
+        $rutaRelativas = [];
+        foreach ($imgRows as $r) {
+            $rrel = (string)($r['ruta_relativa'] ?? '');
+            $rc = (string)($r['ruta_carpeta'] ?? '');
+            if ($rrel !== '') {
+                $rutaToCarpeta[$rrel] = $rc;
+                $rutaRelativas[] = $rrel;
+            }
+        }
 
-        $tagsByRuta = []; // ruta => [label => count]
-        foreach ($rowsTags as $r) {
-            $ruta = (string)($r['ruta'] ?? '');
-            $lab = isset($r['label']) ? strtoupper(trim((string)$r['label'])) : '';
-            $cnt = (int)($r['c'] ?? 0);
-            if ($ruta === '' || $lab === '' || $cnt <= 0) continue;
-            if (!isset($tagsByRuta[$ruta])) $tagsByRuta[$ruta] = [];
-            $tagsByRuta[$ruta][$lab] = ($tagsByRuta[$ruta][$lab] ?? 0) + $cnt;
+        $tagsByRuta = []; // ruta => [label => count] (count = imágenes distintas por label)
+        if (!empty($rutaRelativas)) {
+            $ph2 = implode(',', array_fill(0, count($rutaRelativas), '?'));
+            $stmtDet = $pdo->prepare("
+                SELECT image_ruta_relativa, label
+                FROM {$tDet}
+                WHERE image_ruta_relativa IN ($ph2)
+            ");
+            $stmtDet->execute($rutaRelativas);
+            $detRows = $stmtDet->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $byRutaLabel = []; // clave "ruta\0label" => set de image_ruta_relativa
+            foreach ($detRows as $dr) {
+                $rrel = (string)($dr['image_ruta_relativa'] ?? '');
+                $lab = isset($dr['label']) ? strtoupper(trim((string)$dr['label'])) : '';
+                if ($rrel === '' || $lab === '') continue;
+                $rc = $rutaToCarpeta[$rrel] ?? null;
+                if ($rc === null) continue;
+                $key = $rc . "\0" . $lab;
+                if (!isset($byRutaLabel[$key])) $byRutaLabel[$key] = [];
+                $byRutaLabel[$key][$rrel] = true;
+            }
+            foreach ($byRutaLabel as $key => $set) {
+                $parts = explode("\0", $key, 2);
+                $rc = $parts[0] ?? '';
+                $lab = $parts[1] ?? '';
+                if ($rc === '' || $lab === '') continue;
+                if (!isset($tagsByRuta[$rc])) $tagsByRuta[$rc] = [];
+                $tagsByRuta[$rc][$lab] = (int)count($set);
+            }
         }
 
         // Pendientes por carpeta
@@ -501,7 +533,7 @@ class CarpetasController extends BaseController
                 ], 404);
             }
             
-            // --- Lookup estado + tags por imagen de esta carpeta ---
+            // --- Lookup estado + tags por imagen de esta carpeta (2 consultas sin JOIN) ---
             $pdo = AppConnection::get();
             AppSchema::ensure($pdo);
             $tImg = AppConnection::table('images');
@@ -509,38 +541,53 @@ class CarpetasController extends BaseController
 
             $rutaNorm = str_replace('\\', '/', (string)$ruta);
             $rutaNorm = trim($rutaNorm, '/');
-            $stmt = $pdo->prepare("
-                SELECT
-                  i.ruta_relativa,
-                  i.archivo,
-                  i.clasif_estado,
-                  i.detect_estado,
-                  d.label
-                FROM {$tImg} i
-                LEFT JOIN {$tDet} d
-                  ON d.image_ruta_relativa = i.ruta_relativa
-                WHERE COALESCE(i.ruta_carpeta,'') = :rc
-            ");
-            $stmt->execute([':rc' => $rutaNorm]);
-            $rows = $stmt->fetchAll() ?: [];
 
-            $byArchivo = []; // archivo => ['ruta_relativa'=>..., 'pendiente'=>bool, 'tags'=>set]
-            foreach ($rows as $r) {
+            $stmtImg = $pdo->prepare("
+                SELECT ruta_relativa, archivo, clasif_estado, detect_estado
+                FROM {$tImg}
+                WHERE workspace_slug = :ws AND COALESCE(ruta_carpeta,'') = :rc
+            ");
+            $stmtImg->execute([':ws' => $ws, ':rc' => $rutaNorm]);
+            $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $byArchivo = [];
+            $rutaRelativas = [];
+            foreach ($imgRows as $r) {
                 $archivo = (string)($r['archivo'] ?? '');
                 if ($archivo === '') continue;
-                if (!isset($byArchivo[$archivo])) {
-                    $clas = (string)($r['clasif_estado'] ?? '');
-                    $det = (string)($r['detect_estado'] ?? '');
-                    $pend = ($det !== 'ok') || ($clas === 'pending');
-                    $byArchivo[$archivo] = [
-                        'ruta_relativa' => (string)($r['ruta_relativa'] ?? ''),
-                        'pendiente' => $pend,
-                        'tagsMap' => []
-                    ];
+                $rrel = (string)($r['ruta_relativa'] ?? '');
+                $clas = (string)($r['clasif_estado'] ?? '');
+                $det = (string)($r['detect_estado'] ?? '');
+                $pend = ($det !== 'ok') || ($clas === 'pending');
+                $byArchivo[$archivo] = [
+                    'ruta_relativa' => $rrel,
+                    'pendiente' => $pend,
+                    'tagsMap' => []
+                ];
+                if ($rrel !== '') $rutaRelativas[] = $rrel;
+            }
+
+            if (!empty($rutaRelativas)) {
+                $ph = implode(',', array_fill(0, count($rutaRelativas), '?'));
+                $stmtDet = $pdo->prepare("
+                    SELECT image_ruta_relativa, label
+                    FROM {$tDet}
+                    WHERE workspace_slug = ? AND image_ruta_relativa IN ($ph)
+                ");
+                $stmtDet->execute(array_merge([$ws], $rutaRelativas));
+                $detRows = $stmtDet->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                $rutaToArchivo = [];
+                foreach ($byArchivo as $arch => $data) {
+                    $rutaToArchivo[(string)$data['ruta_relativa']] = $arch;
                 }
-                $lab = isset($r['label']) ? strtoupper(trim((string)$r['label'])) : '';
-                if ($lab !== '') {
-                    $byArchivo[$archivo]['tagsMap'][$lab] = true;
+                foreach ($detRows as $dr) {
+                    $rrel = (string)($dr['image_ruta_relativa'] ?? '');
+                    $lab = isset($dr['label']) ? strtoupper(trim((string)$dr['label'])) : '';
+                    if ($lab === '' || $rrel === '') continue;
+                    $arch = $rutaToArchivo[$rrel] ?? null;
+                    if ($arch !== null) {
+                        $byArchivo[$arch]['tagsMap'][$lab] = true;
+                    }
                 }
             }
 
@@ -663,10 +710,17 @@ class CarpetasController extends BaseController
                 $contentType = $useWebp ? 'image/webp' : 'image/jpeg';
                 $cachePath = $cacheDirResolved . DIRECTORY_SEPARATOR . $key . '.' . $extOut;
                 $forceRegenerate = isset($_GET['force']) && ($_GET['force'] === '1' || $_GET['force'] === 1);
+                $isHead = (strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'HEAD');
 
                 if (!$forceRegenerate && is_file($cachePath)) {
                     if (filesize($cachePath) > 0) {
                         header('X-Thumb-Workspace: ' . $ws);
+                        if ($isHead) {
+                            header('HTTP/1.1 204 No Content');
+                            header('X-Thumb-Cached: 1');
+                            header('Access-Control-Expose-Headers: X-Thumb-New, X-Thumb-Cached');
+                            return;
+                        }
                         $this->outputFile($cachePath, $contentType, true, true);
                         return;
                     }
@@ -682,6 +736,12 @@ class CarpetasController extends BaseController
                         fclose($lockFp);
                         @unlink($lockPath);
                         header('X-Thumb-Workspace: ' . $ws);
+                        if ($isHead) {
+                            header('HTTP/1.1 204 No Content');
+                            header('X-Thumb-Cached: 1');
+                            header('Access-Control-Expose-Headers: X-Thumb-New, X-Thumb-Cached');
+                            return;
+                        }
                         $this->outputFile($cachePath, $contentType, true, true);
                         return;
                     }
@@ -762,6 +822,12 @@ class CarpetasController extends BaseController
                             if ($thumbData !== null && strlen($thumbData) > 0) {
                                 @file_put_contents($cachePath, $thumbData, LOCK_EX);
                                 $releaseLock();
+                                if ($isHead) {
+                                    header('HTTP/1.1 204 No Content');
+                                    header('X-Thumb-New: 1');
+                                    header('Access-Control-Expose-Headers: X-Thumb-New, X-Thumb-Cached');
+                                    return;
+                                }
                                 while (ob_get_level()) {
                                     ob_end_clean();
                                 }
@@ -770,7 +836,7 @@ class CarpetasController extends BaseController
                                 header('Content-Length: ' . strlen($thumbData));
                                 header('Cache-Control: public, max-age=31536000, immutable');
                                 header('X-Thumb-New: 1');
-                                header('Access-Control-Expose-Headers: X-Thumb-New');
+                                header('Access-Control-Expose-Headers: X-Thumb-New, X-Thumb-Cached');
                                 echo $thumbData;
                                 exit;
                             }

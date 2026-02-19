@@ -21,6 +21,9 @@ class ImagenesIndex
     private const MAX_RESULTADOS_BUSQUEDA_ETIQUETAS = 500;
     private const MD5_HEX_LEN = 32;
 
+    /** Columnas usadas por rowToRecord(); evita SELECT * en getImagen y obtenerSiguientePendienteProcesar. */
+    private const IMAGE_RECORD_COLUMNS = 'ruta_completa, ruta_relativa, ruta_carpeta, archivo, content_md5, safe, unsafe, resultado';
+
     private function ws(): string
     {
         return \App\Services\AppConnection::currentSlug() ?? 'default';
@@ -205,7 +208,7 @@ class ImagenesIndex
 
     public function getImagen(string $key): ?array
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM ' . $this->tImages . ' WHERE workspace_slug = :ws AND ruta_relativa = :k');
+        $stmt = $this->pdo->prepare('SELECT ' . self::IMAGE_RECORD_COLUMNS . ' FROM ' . $this->tImages . ' WHERE workspace_slug = :ws AND ruta_relativa = :k');
         $stmt->execute([':ws' => $this->ws(), ':k' => $key]);
         $row = $stmt->fetch();
         return $row ? $this->rowToRecord($row) : null;
@@ -214,18 +217,21 @@ class ImagenesIndex
     public function getStats(bool $recalcularSiInconsistente = true): array
     {
         $ws = $this->ws();
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws");
+        $stmt = $this->pdo->prepare("
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN clasif_estado IS NOT NULL AND clasif_estado <> 'pending' THEN 1 ELSE 0 END) AS procesadas,
+                SUM(CASE WHEN resultado = 'safe' THEN 1 ELSE 0 END) AS safe,
+                SUM(CASE WHEN resultado = 'unsafe' THEN 1 ELSE 0 END) AS unsafe
+            FROM " . $this->tImages . "
+            WHERE workspace_slug = :ws
+        ");
         $stmt->execute([':ws' => $ws]);
-        $total = (int)$stmt->fetchColumn();
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND clasif_estado <> 'pending'");
-        $stmt->execute([':ws' => $ws]);
-        $procesadas = (int)$stmt->fetchColumn();
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND resultado = 'safe'");
-        $stmt->execute([':ws' => $ws]);
-        $safe = (int)$stmt->fetchColumn();
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND resultado = 'unsafe'");
-        $stmt->execute([':ws' => $ws]);
-        $unsafe = (int)$stmt->fetchColumn();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $total = (int)($row['total'] ?? 0);
+        $procesadas = (int)($row['procesadas'] ?? 0);
+        $safe = (int)($row['safe'] ?? 0);
+        $unsafe = (int)($row['unsafe'] ?? 0);
         return [
             'total' => $total,
             'procesadas' => $procesadas,
@@ -239,20 +245,19 @@ class ImagenesIndex
     public function getStatsDeteccion(bool $recalcularSiInconsistente = true): array
     {
         $ws = $this->ws();
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND detect_requerida = 1");
-        $stmt->execute([':ws' => $ws]);
-        $requeridas = (int)$stmt->fetchColumn();
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND detect_requerida = 1 AND detect_estado = 'ok'");
-        $stmt->execute([':ws' => $ws]);
-        $procesadas = (int)$stmt->fetchColumn();
         $stmt = $this->pdo->prepare("
-            SELECT COUNT(*)
+            SELECT
+                SUM(CASE WHEN detect_requerida = 1 THEN 1 ELSE 0 END) AS requeridas,
+                SUM(CASE WHEN detect_requerida = 1 AND detect_estado = 'ok' THEN 1 ELSE 0 END) AS procesadas,
+                SUM(CASE WHEN detect_requerida = 1 AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error') THEN 1 ELSE 0 END) AS pendientes
             FROM " . $this->tImages . "
-            WHERE workspace_slug = :ws AND detect_requerida = 1
-              AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error')
+            WHERE workspace_slug = :ws
         ");
         $stmt->execute([':ws' => $ws]);
-        $pendientes = (int)$stmt->fetchColumn();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $requeridas = (int)($row['requeridas'] ?? 0);
+        $procesadas = (int)($row['procesadas'] ?? 0);
+        $pendientes = (int)($row['pendientes'] ?? 0);
 
         $stmt = $this->pdo->prepare("
             SELECT label, COUNT(DISTINCT image_ruta_relativa) as c
@@ -560,7 +565,7 @@ class ImagenesIndex
     {
         $ws = $this->ws();
         $stmt = $this->pdo->prepare("
-            SELECT *
+            SELECT " . self::IMAGE_RECORD_COLUMNS . "
             FROM " . $this->tImages . "
             WHERE workspace_slug = :ws
               AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error')
@@ -574,7 +579,7 @@ class ImagenesIndex
             return [$k, $this->rowToRecord($row), 'deteccion'];
         }
 
-        $stmt = $this->pdo->prepare("SELECT * FROM " . $this->tImages . " WHERE workspace_slug = :ws AND clasif_estado = 'pending' ORDER BY ruta_relativa ASC LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT " . self::IMAGE_RECORD_COLUMNS . " FROM " . $this->tImages . " WHERE workspace_slug = :ws AND clasif_estado = 'pending' ORDER BY ruta_relativa ASC LIMIT 1");
         $stmt->execute([':ws' => $ws]);
         $row = $stmt->fetch();
         if ($row) {
@@ -806,17 +811,33 @@ class ImagenesIndex
         if (empty($labelsNorm)) return [];
 
         $ws = $this->ws();
-        $placeholders = implode(',', array_fill(0, count($labelsNorm), '?'));
-        $labelCondition = "UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)";
+
+        $labelsToUse = [];
+        try {
+            $stmtL = $this->pdo->prepare("SELECT DISTINCT label FROM " . $this->tDetections . " WHERE workspace_slug = :ws");
+            $stmtL->execute([':ws' => $ws]);
+            while ($stmtL && ($row = $stmtL->fetch(\PDO::FETCH_NUM))) {
+                $raw = (string)($row[0] ?? '');
+                if ($raw !== '' && in_array(self::normalizarLabel($raw), $labelsNorm, true)) {
+                    $labelsToUse[$raw] = true;
+                }
+            }
+            $labelsToUse = array_keys($labelsToUse);
+        } catch (\Throwable $e) {
+            $labelsToUse = [];
+        }
+        if (empty($labelsToUse)) return [];
+
+        $ph = implode(',', array_fill(0, count($labelsToUse), '?'));
         $stmtTop = $this->pdo->prepare("
-            SELECT d.image_ruta_relativa, MAX(d.score) as best_score
-            FROM " . $this->tDetections . " d
-            WHERE d.workspace_slug = ? AND $labelCondition AND d.score >= ?
-            GROUP BY d.image_ruta_relativa
+            SELECT image_ruta_relativa, MAX(score) AS best_score
+            FROM " . $this->tDetections . "
+            WHERE workspace_slug = ? AND label IN ($ph) AND score >= ?
+            GROUP BY image_ruta_relativa
             ORDER BY best_score DESC
             LIMIT " . self::MAX_RESULTADOS_BUSQUEDA_ETIQUETAS . "
         ");
-        $stmtTop->execute(array_merge([$ws], $labelsNorm, [$umbral]));
+        $stmtTop->execute(array_merge([$ws], $labelsToUse, [$umbral]));
         $top = $stmtTop->fetchAll();
         if (empty($top)) return [];
 
@@ -825,31 +846,23 @@ class ImagenesIndex
         foreach ($top as $r) $bestByKey[(string)$r['image_ruta_relativa']] = (float)$r['best_score'];
 
         $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
-        $stmtExists = $this->pdo->prepare("SELECT ruta_relativa FROM " . $this->tImages . " WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
-        $stmtExists->execute(array_merge([$ws], $imageKeys));
-        $existingKeys = [];
-        while ($row = $stmtExists->fetch(\PDO::FETCH_NUM)) {
-            $existingKeys[(string)$row[0]] = true;
-        }
-        $imageKeys = array_values(array_filter($imageKeys, fn($k) => !empty($existingKeys[$k])));
-        if (empty($imageKeys)) return [];
-
-        $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
         $stmtInfo = $this->pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM " . $this->tImages . " WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
         $stmtInfo->execute(array_merge([$ws], $imageKeys));
         $infoRows = $stmtInfo->fetchAll();
         $infoByKey = [];
-        foreach ($infoRows as $r) $infoByKey[(string)$r['ruta_relativa']] = $r;
+        foreach ($infoRows as $r) {
+            $infoByKey[(string)$r['ruta_relativa']] = $r;
+        }
+        $imageKeys = array_values(array_filter($imageKeys, fn($k) => isset($infoByKey[$k])));
+        if (empty($imageKeys)) return [];
 
         $stmtMatches = $this->pdo->prepare("
-            SELECT d.image_ruta_relativa, d.label, MAX(d.score) as score
-            FROM " . $this->tDetections . " d
-            WHERE d.workspace_slug = ? AND d.image_ruta_relativa IN ($ph2)
-              AND UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)
-              AND d.score >= ?
-            GROUP BY d.image_ruta_relativa, d.label
+            SELECT image_ruta_relativa, label, MAX(score) AS score
+            FROM " . $this->tDetections . "
+            WHERE workspace_slug = ? AND image_ruta_relativa IN ($ph2) AND label IN ($ph) AND score >= ?
+            GROUP BY image_ruta_relativa, label
         ");
-        $stmtMatches->execute(array_merge([$ws], $imageKeys, $labelsNorm, [$umbral]));
+        $stmtMatches->execute(array_merge([$ws], $imageKeys, $labelsToUse, [$umbral]));
         $matchRows = $stmtMatches->fetchAll();
         $matchesByKey = [];
         foreach ($matchRows as $r) {

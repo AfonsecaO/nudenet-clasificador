@@ -296,15 +296,17 @@ class WorkspaceController extends BaseController
                 $out['updated_at'] = $latest;
             }
 
-            $st = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = :ws");
+            $st = $pdo->prepare("
+                SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN detect_estado IS NULL OR detect_estado IN ('na','pending') THEN 1 ELSE 0 END) AS pending
+                FROM {$tImages} WHERE workspace_slug = :ws
+            ");
             $st->execute([':ws' => $slug]);
-            $out['images_total'] = (int)$st->fetchColumn();
+            $imgRow = $st->fetch(PDO::FETCH_ASSOC);
+            $out['images_total'] = (int)($imgRow['total'] ?? 0);
+            $out['images_pending'] = (int)($imgRow['pending'] ?? 0);
 
-            $st = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = :ws AND (detect_estado IS NULL OR detect_estado='na' OR detect_estado='pending')");
-            $st->execute([':ws' => $slug]);
-            $out['images_pending'] = (int)$st->fetchColumn();
-
-            $st = $pdo->prepare("SELECT COUNT(*) FROM {$tDetections} WHERE workspace_slug = :ws");
+            $st = $pdo->prepare("SELECT COUNT(DISTINCT image_ruta_relativa) FROM {$tDetections} WHERE workspace_slug = :ws");
             $st->execute([':ws' => $slug]);
             $out['detections_total'] = (int)$st->fetchColumn();
 
@@ -391,21 +393,50 @@ class WorkspaceController extends BaseController
                             $rutaP = (string)($row['ruta'] ?? '');
                             if ($rutaP !== '') $pendByRuta[$rutaP] = (int)($row['c'] ?? 0);
                         }
-                        $stmtTags = $pdo->prepare("
-                            SELECT i.ruta_carpeta as ruta, d.label as label, COUNT(DISTINCT i.ruta_relativa) as c
-                            FROM {$tImages} i
-                            JOIN {$tDet} d ON d.workspace_slug = i.workspace_slug AND d.image_ruta_relativa = i.ruta_relativa
-                            WHERE i.workspace_slug = ? AND COALESCE(i.ruta_carpeta,'') IN ($ph)
-                            GROUP BY i.ruta_carpeta, d.label
+                        // Tags sin JOIN: imágenes por carpeta, luego detecciones por imagen
+                        $stmtImg = $pdo->prepare("
+                            SELECT ruta_relativa, ruta_carpeta
+                            FROM {$tImages}
+                            WHERE workspace_slug = ? AND COALESCE(ruta_carpeta,'') IN ($ph)
                         ");
-                        $stmtTags->execute(array_merge([$slug], $rutas));
-                        foreach ($stmtTags->fetchAll() ?: [] as $row) {
-                            $rutaP = (string)($row['ruta'] ?? '');
-                            $lab = isset($row['label']) ? strtoupper(trim((string)$row['label'])) : '';
-                            $cnt = (int)($row['c'] ?? 0);
-                            if ($rutaP !== '' && $lab !== '' && $cnt > 0) {
-                                if (!isset($tagsByRuta[$rutaP])) $tagsByRuta[$rutaP] = [];
-                                $tagsByRuta[$rutaP][$lab] = ($tagsByRuta[$rutaP][$lab] ?? 0) + $cnt;
+                        $stmtImg->execute(array_merge([$slug], $rutas));
+                        $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                        $rutaToCarpeta = [];
+                        $rutaRelativas = [];
+                        foreach ($imgRows as $r) {
+                            $rrel = (string)($r['ruta_relativa'] ?? '');
+                            $rc = (string)($r['ruta_carpeta'] ?? '');
+                            if ($rrel !== '') {
+                                $rutaToCarpeta[$rrel] = $rc;
+                                $rutaRelativas[] = $rrel;
+                            }
+                        }
+                        if (!empty($rutaRelativas)) {
+                            $ph2 = implode(',', array_fill(0, count($rutaRelativas), '?'));
+                            $stmtDet = $pdo->prepare("
+                                SELECT image_ruta_relativa, label
+                                FROM {$tDet}
+                                WHERE workspace_slug = ? AND image_ruta_relativa IN ($ph2)
+                            ");
+                            $stmtDet->execute(array_merge([$slug], $rutaRelativas));
+                            $byRutaLabel = [];
+                            foreach ($stmtDet->fetchAll(PDO::FETCH_ASSOC) ?: [] as $dr) {
+                                $rrel = (string)($dr['image_ruta_relativa'] ?? '');
+                                $lab = isset($dr['label']) ? strtoupper(trim((string)$dr['label'])) : '';
+                                if ($rrel === '' || $lab === '') continue;
+                                $rc = $rutaToCarpeta[$rrel] ?? null;
+                                if ($rc === null) continue;
+                                $key = $rc . "\0" . $lab;
+                                if (!isset($byRutaLabel[$key])) $byRutaLabel[$key] = [];
+                                $byRutaLabel[$key][$rrel] = true;
+                            }
+                            foreach ($byRutaLabel as $key => $set) {
+                                $parts = explode("\0", $key, 2);
+                                $rc = $parts[0] ?? '';
+                                $lab = $parts[1] ?? '';
+                                if ($rc === '' || $lab === '') continue;
+                                if (!isset($tagsByRuta[$rc])) $tagsByRuta[$rc] = [];
+                                $tagsByRuta[$rc][$lab] = (int)count($set);
                             }
                         }
                     }
@@ -523,6 +554,10 @@ class WorkspaceController extends BaseController
         return $label;
     }
 
+    /**
+     * Búsqueda global: detections donde label = tag seleccionado y score >= umbral.
+     * Una sola consulta con JOIN a images para traer los datos necesarios.
+     */
     public function buscarImagenesEtiquetasConsolidado()
     {
         try {
@@ -532,114 +567,76 @@ class WorkspaceController extends BaseController
             $umbralFloat = $umbral / 100.0;
 
             $labelsStr = trim((string)$labelsStr);
-            $labels = [];
-            if ($labelsStr !== '') {
-                $labels = array_filter(array_map('trim', explode(',', $labelsStr)));
-            }
-
+            $labels = $labelsStr !== '' ? array_values(array_filter(array_map('trim', explode(',', $labelsStr)))) : [];
             if (empty($labels)) {
                 $this->jsonResponse(['success' => false, 'error' => 'Parámetro labels requerido (csv)'], 400);
                 return;
             }
 
-            $labelsNorm = [];
-            foreach ($labels as $lab) {
-                $lab = self::normalizarLabel((string)$lab);
-                if ($lab !== '') $labelsNorm[] = $lab;
-            }
-            $labelsNorm = array_values(array_unique($labelsNorm));
+            $labelsNorm = array_values(array_unique(array_filter(array_map(function ($lab) {
+                return self::normalizarLabel((string)$lab);
+            }, $labels))));
             if (empty($labelsNorm)) {
                 $this->jsonResponse(['success' => true, 'labels' => $labels, 'umbral' => $umbral, 'total' => 0, 'imagenes' => []]);
                 return;
             }
 
-            $slugs = WorkspaceService::listWorkspaces();
-            $allImagenes = [];
-            $placeholders = implode(',', array_fill(0, count($labelsNorm), '?'));
-            $labelCondition = "UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)";
+            \App\Services\AppSchema::ensure(AppConnection::get());
             $pdo = AppConnection::get();
-            $tImg = AppConnection::table('images');
             $tDet = AppConnection::table('detections');
+            $tImg = AppConnection::table('images');
 
-            foreach ($slugs as $slug) {
-                if (count($allImagenes) >= self::LIMIT_IMAGENES_GLOBAL) {
-                    break;
+            // Resolver labels tal como están en la BD (para coincidir exacto)
+            $labelsToUse = [];
+            try {
+                $stmtLabels = $pdo->query("SELECT DISTINCT label FROM {$tDet}");
+                while ($stmtLabels && ($row = $stmtLabels->fetch(PDO::FETCH_NUM))) {
+                    $raw = (string)($row[0] ?? '');
+                    if ($raw !== '' && in_array(self::normalizarLabel($raw), $labelsNorm, true)) {
+                        $labelsToUse[$raw] = true;
+                    }
                 }
-                $slug = (string)$slug;
-                try {
-                    $stmtTop = $pdo->prepare("
-                        SELECT d.image_ruta_relativa, MAX(d.score) as best_score
-                        FROM {$tDet} d
-                        WHERE d.workspace_slug = :ws AND $labelCondition AND d.score >= ?
-                        GROUP BY d.image_ruta_relativa
-                        ORDER BY best_score DESC
-                        LIMIT " . self::LIMIT_IMAGENES_POR_WS . "
-                    ");
-                    $stmtTop->execute(array_merge([$slug], $labelsNorm, [$umbralFloat]));
-                    $top = $stmtTop->fetchAll();
-                    if (empty($top)) continue;
-
-                    $imageKeys = array_map(fn($r) => (string)$r['image_ruta_relativa'], $top);
-                    $bestByKey = [];
-                    foreach ($top as $r) $bestByKey[(string)$r['image_ruta_relativa']] = (float)$r['best_score'];
-
-                    $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
-                    $stmtExists = $pdo->prepare("SELECT ruta_relativa FROM {$tImg} WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
-                    $stmtExists->execute(array_merge([$slug], $imageKeys));
-                    $existingKeys = [];
-                    while ($row = $stmtExists->fetch(PDO::FETCH_NUM)) {
-                        $existingKeys[(string)$row[0]] = true;
-                    }
-                    $imageKeys = array_values(array_filter($imageKeys, fn($k) => !empty($existingKeys[$k])));
-                    if (empty($imageKeys)) continue;
-
-                    $stmtInfo = $pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM {$tImg} WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
-                    $stmtInfo->execute(array_merge([$slug], $imageKeys));
-                    $infoRows = $stmtInfo->fetchAll();
-                    $infoByKey = [];
-                    foreach ($infoRows as $r) $infoByKey[(string)$r['ruta_relativa']] = $r;
-
-                    $stmtMatches = $pdo->prepare("
-                        SELECT d.image_ruta_relativa, d.label, MAX(d.score) as score
-                        FROM {$tDet} d
-                        WHERE d.workspace_slug = ? AND d.image_ruta_relativa IN ($ph2)
-                          AND UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)
-                          AND d.score >= ?
-                        GROUP BY d.image_ruta_relativa, d.label
-                    ");
-                    $stmtMatches->execute(array_merge([$slug], $imageKeys, $labelsNorm, [$umbralFloat]));
-                    $matchRows = $stmtMatches->fetchAll();
-                    $matchesByKey = [];
-                    foreach ($matchRows as $r) {
-                        $k = (string)$r['image_ruta_relativa'];
-                        $matchesByKey[$k][] = ['label' => (string)$r['label'], 'score' => (float)$r['score']];
-                    }
-
-                    foreach ($imageKeys as $k) {
-                        $info = $infoByKey[$k] ?? null;
-                        if (!$info) continue;
-                        $allImagenes[] = [
-                            'ruta_relativa' => $k,
-                            'ruta_carpeta' => (string)($info['ruta_carpeta'] ?? ''),
-                            'archivo' => (string)($info['archivo'] ?? ''),
-                            'best_score' => (float)($bestByKey[$k] ?? 0),
-                            'matches' => $matchesByKey[$k] ?? [],
-                            'workspace' => $slug,
-                        ];
-                    }
-                } catch (\Throwable $e) {
-                    // omitir workspace
-                }
+                $labelsToUse = array_keys($labelsToUse);
+            } catch (\Throwable $e) {
+                $labelsToUse = [];
+            }
+            if (empty($labelsToUse)) {
+                $this->jsonResponse(['success' => true, 'labels' => $labels, 'umbral' => $umbral, 'total' => 0, 'imagenes' => []]);
+                return;
             }
 
-            usort($allImagenes, fn($a, $b) => ($b['best_score'] <=> $a['best_score']));
+            $ph = implode(',', array_fill(0, count($labelsToUse), '?'));
+            $sql = "
+                SELECT d.workspace_slug, d.image_ruta_relativa, MAX(d.score) AS best_score,
+                       MAX(i.ruta_carpeta) AS ruta_carpeta, MAX(i.archivo) AS archivo
+                FROM {$tDet} d
+                INNER JOIN {$tImg} i ON i.workspace_slug = d.workspace_slug AND i.ruta_relativa = d.image_ruta_relativa
+                WHERE d.label IN ({$ph}) AND d.score >= ?
+                GROUP BY d.workspace_slug, d.image_ruta_relativa
+                ORDER BY best_score DESC
+                LIMIT " . self::LIMIT_IMAGENES_GLOBAL;
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array_merge($labelsToUse, [$umbralFloat]));
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $imagenes = [];
+            foreach ($rows as $r) {
+                $imagenes[] = [
+                    'workspace' => (string)($r['workspace_slug'] ?? ''),
+                    'ruta_relativa' => (string)($r['image_ruta_relativa'] ?? ''),
+                    'ruta_carpeta' => (string)($r['ruta_carpeta'] ?? ''),
+                    'archivo' => (string)($r['archivo'] ?? ''),
+                    'best_score' => (float)($r['best_score'] ?? 0),
+                    'matches' => [],
+                ];
+            }
 
             $this->jsonResponse([
                 'success' => true,
                 'labels' => $labels,
                 'umbral' => $umbral,
-                'total' => count($allImagenes),
-                'imagenes' => $allImagenes,
+                'total' => count($imagenes),
+                'imagenes' => $imagenes,
             ]);
         } catch (\Exception $e) {
             $this->jsonResponse(['success' => false, 'error' => $e->getMessage()], 500);

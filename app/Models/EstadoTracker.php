@@ -144,7 +144,7 @@ class EstadoTracker
      */
     public function getEstado()
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws');
+        $stmt = $this->pdo->prepare('SELECT tabla, ultimo_id, max_id, faltan_registros, ultima_actualizacion, ultima_actualizacion_contador FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws');
         $stmt->execute([':ws' => $this->ws()]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         $out = [];
