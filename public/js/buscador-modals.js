@@ -60,7 +60,23 @@
     if (loader) loader.remove();
   }
 
-  /** Carga el thumb por URL directa (sin fetch/blob). Reintentos escalonados si falla. */
+  function addNewBadgeToCard(card) {
+    if (!card) return;
+    var wrap = card.querySelector('.thumb-card-img');
+    if (!wrap || wrap.querySelector('.thumb-badge-new')) return;
+    var badge = document.createElement('span');
+    badge.className = 'thumb-badge-new';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.textContent = 'New';
+    wrap.appendChild(badge);
+  }
+
+  /**
+   * Carga el thumb con caché (sin cache-buster). Si el servidor acaba de crear el thumb
+   * (X-Thumb-New: 1), muestra el badge "New". HEAD se hace primero para que el badge se
+   * decida antes de cargar la imagen (si hacemos img.src antes, el GET puede generar el thumb
+   * y el HEAD luego recibe X-Thumb-Cached y no se muestra el badge).
+   */
   function loadThumbWithNewBadge(img, thumbUrl, card) {
     if (!img || !thumbUrl) {
       removeThumbLoader(card);
@@ -68,10 +84,11 @@
     }
     removeThumbLoader(card);
     img.loading = 'eager';
-    var sep = thumbUrl.indexOf('?') >= 0 ? '&' : '?';
-    function setSrc() {
-      img.src = thumbUrl + sep + '_=' + Date.now();
+
+    function setImageSrc() {
+      img.src = thumbUrl;
     }
+
     var retries = 0;
     var maxRetries = 3;
     img.onerror = function () {
@@ -79,10 +96,20 @@
       if (retries < maxRetries) {
         retries++;
         var delay = retries === 1 ? 200 : (retries === 2 ? 500 : 900);
-        setTimeout(setSrc, delay);
+        setTimeout(setImageSrc, delay);
       }
     };
-    setSrc();
+
+    fetch(thumbUrl, { method: 'HEAD', cache: 'no-store' })
+      .then(function (r) {
+        if (r.headers.get('X-Thumb-New') === '1' && r.headers.get('X-Thumb-Cached') !== '1') {
+          addNewBadgeToCard(card);
+        }
+        setImageSrc();
+      })
+      .catch(function () {
+        setImageSrc();
+      });
   }
 
   var THUMB_SCROLL_DELAY_MS = 120;

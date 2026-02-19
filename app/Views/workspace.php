@@ -950,7 +950,12 @@ function fmtTs($ts): string {
       expandirBuscadorGlobal('etiquetas');
       setStatus(stBuscarEtiquetasGlobal, 'neutral', 'Buscando…');
       if (lstEtiquetasGlobal) lstEtiquetasGlobal.innerHTML = '<div class="text-muted py-2 text-center small"><i class="fas fa-spinner fa-spin mr-1"></i> Consultando…</div>';
-      const umbral = getUmbralGlobal();
+      // Si el slider está en 0%, usar umbral 0 para incluir todas las imágenes con esa etiqueta.
+      // Si no, usar el mínimo de la etiqueta para incluir las del rango del tag, o el valor del slider.
+      const sliderVal = getUmbralGlobal();
+      const tag = allEtiquetasGlobal.find(function (t) { return String(t?.label || '').trim() === label; });
+      const umbralTag = (tag && tag.min != null && !Number.isNaN(Number(tag.min))) ? Math.max(0, Math.min(100, Number(tag.min))) : null;
+      const umbral = (sliderVal === 0) ? 0 : (umbralTag != null ? umbralTag : (label ? 0 : sliderVal));
       const { ok, data } = await getJson(apiUrl('buscar_imagenes_etiquetas_global', { labels: label, umbral: umbral }));
       if (!ok || !data?.success) {
         setStatus(stBuscarEtiquetasGlobal, 'bad', String(data?.error || 'Error'));

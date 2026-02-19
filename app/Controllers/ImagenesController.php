@@ -7,6 +7,7 @@ use App\Models\CarpetasIndex;
 use App\Services\LogService;
 use App\Services\AppConnection;
 use App\Services\AppSchema;
+use App\Services\WorkspaceService;
 
 class ImagenesController extends BaseController
 {
@@ -113,6 +114,23 @@ class ImagenesController extends BaseController
         return $out;
     }
 
+    /**
+     * Total de imágenes con al menos una detección (COUNT DISTINCT por imagen) para el workspace actual.
+     */
+    private function getDetectionsTotalForCurrentWorkspace(): int
+    {
+        $ws = WorkspaceService::current();
+        if ($ws === null || $ws === '') {
+            return 0;
+        }
+        $pdo = AppConnection::get();
+        $tDet = AppConnection::table('detections');
+        $st = $pdo->prepare("SELECT COUNT(DISTINCT image_ruta_relativa) FROM {$tDet} WHERE workspace_slug = :ws");
+        $st->execute([':ws' => $ws]);
+        $n = $st->fetchColumn();
+        return ($n !== false) ? (int)$n : 0;
+    }
+
     public function estadisticas()
     {
         try {
@@ -120,10 +138,7 @@ class ImagenesController extends BaseController
             $stats = $imagenesIndex->getStats(true);
             $statsDet = $imagenesIndex->getStatsDeteccion(true);
             $stats['pendientes_deteccion'] = (int)($statsDet['pendientes'] ?? 0);
-            $pdo = AppConnection::get();
-            $tDet = AppConnection::table('detections');
-            $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
-            $stats['detections_total'] = ($detCount !== false) ? (int)$detCount : 0;
+            $stats['detections_total'] = $this->getDetectionsTotalForCurrentWorkspace();
 
             $this->jsonResponse([
                 'success' => true,
@@ -153,10 +168,6 @@ class ImagenesController extends BaseController
             if ($siguiente === null) {
                 $stats = $imagenesIndex->getStats(true);
                 $statsDet = $imagenesIndex->getStatsDeteccion(true);
-                $pdo = AppConnection::get();
-                $tDet = AppConnection::table('detections');
-                $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
-                $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
                 $this->jsonResponse([
                     'success' => true,
                     'procesada' => false,
@@ -164,7 +175,7 @@ class ImagenesController extends BaseController
                     'pendientes' => (int)($stats['pendientes'] ?? 0),
                     'pendientes_clasificacion' => (int)($stats['pendientes'] ?? 0),
                     'pendientes_deteccion' => (int)($statsDet['pendientes'] ?? 0),
-                    'detections_total' => $detectionsTotal,
+                    'detections_total' => $this->getDetectionsTotalForCurrentWorkspace(),
                     'stats' => $stats,
                     'stats_deteccion' => $statsDet
                 ]);
@@ -179,10 +190,6 @@ class ImagenesController extends BaseController
                 $statsDet = $imagenesIndex->getStatsDeteccion(true);
                 $pendientesClas = (int)($stats['pendientes'] ?? 0);
                 $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
-                $pdo = AppConnection::get();
-                $tDet = AppConnection::table('detections');
-                $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
-                $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
                 $this->jsonResponse([
                     'success' => true,
                     'tag' => 'error',
@@ -194,7 +201,7 @@ class ImagenesController extends BaseController
                     'pendientes_clasificacion' => $pendientesClas,
                     'pendientes_deteccion' => $pendientesDet,
                     'pendientes_total' => ($pendientesClas + $pendientesDet),
-                    'detections_total' => $detectionsTotal,
+                    'detections_total' => $this->getDetectionsTotalForCurrentWorkspace(),
                     'stats' => $stats,
                     'stats_deteccion' => $statsDet
                 ]);
@@ -361,10 +368,6 @@ class ImagenesController extends BaseController
             $pendientesClas = (int)($stats['pendientes'] ?? 0);
             $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
             $pendientesTotal = $pendientesClas + $pendientesDet;
-            $pdo = AppConnection::get();
-            $tDet = AppConnection::table('detections');
-            $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
-            $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
 
             $rutaRel = $record['ruta_relativa'] ?? $key;
             $logMsg = 'Procesada: ' . $rutaRel . ' · resultado: ' . ($resultado ?? '');
@@ -408,7 +411,7 @@ class ImagenesController extends BaseController
                 'pendientes_deteccion' => $pendientesDet,
                 // Compat/debug: suma de pendientes
                 'pendientes_total' => $pendientesTotal,
-                'detections_total' => $detectionsTotal,
+                'detections_total' => $this->getDetectionsTotalForCurrentWorkspace(),
                 'stats' => $stats,
                 'stats_deteccion' => $statsDet
             ]);
@@ -429,9 +432,6 @@ class ImagenesController extends BaseController
         $statsDet = $imagenesIndex->getStatsDeteccion(true);
         $pendientesClas = (int)($stats['pendientes'] ?? 0);
         $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
-        $pdo = AppConnection::get();
-        $tDet = AppConnection::table('detections');
-        $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
         return [
             'success' => true,
             'procesada' => false,
@@ -443,7 +443,7 @@ class ImagenesController extends BaseController
             'pendientes_clasificacion' => $pendientesClas,
             'pendientes_deteccion' => $pendientesDet,
             'pendientes_total' => $pendientesClas + $pendientesDet,
-            'detections_total' => ($detCount !== false) ? (int)$detCount : 0,
+            'detections_total' => $this->getDetectionsTotalForCurrentWorkspace(),
             'stats' => $stats,
             'stats_deteccion' => $statsDet,
         ];
