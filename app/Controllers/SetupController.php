@@ -2,12 +2,23 @@
 
 namespace App\Controllers;
 
+use App\Services\MysqlAppConfig;
 use PDO;
 
 class SetupController extends BaseController
 {
     public function index()
     {
+        // Limpiar duplicados de parametrización al abrir Setup (un registro por clave canónica)
+        try {
+            $ws = \App\Services\AppConnection::currentSlug();
+            if ($ws !== null && $ws !== '') {
+                \App\Services\ConfigService::dedupeAppConfigForWorkspace($ws);
+            }
+        } catch (\Throwable $e) {
+            // No bloquear la pantalla si falla el dedupe
+        }
+
         $keys = array_merge(
             \App\Services\ConfigService::getKeysRequeridas(),
             \App\Services\ConfigService::getKeysOpcionales()
@@ -23,16 +34,15 @@ class SetupController extends BaseController
         if ($urlStored === '') {
             $values['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
         }
-        $ignoredStored = isset($values['DETECT_IGNORED_LABELS']) ? trim((string)$values['DETECT_IGNORED_LABELS']) : '';
-        if ($ignoredStored === '') {
-            $values['DETECT_IGNORED_LABELS'] = implode(',', \App\Services\DetectionLabels::defaultIgnoredLabels());
-        }
-
+        // No cargar etiquetas ignoradas por defecto: solo usar lo ya guardado en la configuración.
         $faltantes = \App\Services\ConfigService::faltantesRequeridos();
+
+        $mysql_global_available = self::testGlobalMysqlConnection();
 
         $this->render('setup', [
             'faltantes' => $faltantes,
-            'values' => $values
+            'values' => $values,
+            'mysql_global_available' => $mysql_global_available,
         ]);
     }
 
@@ -152,8 +162,9 @@ class SetupController extends BaseController
             $warning = 'Clasificador no verificado: ' . ($clas['error'] ?? 'Error');
         }
 
-        // Persistir
+        // Persistir (motor de BD se eligió en el wizard inicial; no por workspace)
         $pairs = $cfg;
+        unset($pairs['APP_DB_DRIVER']);
         // Normalización de defaults opcionales
         if (empty($pairs['CLASIFICADOR_BASE_URL'])) $pairs['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
         if (!isset($pairs['DETECT_IGNORED_LABELS'])) $pairs['DETECT_IGNORED_LABELS'] = '';
@@ -637,6 +648,30 @@ class SetupController extends BaseController
         }
     }
 
-    // La configuración vive en SQLite (app_config)
+    /**
+     * Comprueba si la parametrización global MySQL tiene una conexión válida.
+     * Usado en setup para habilitar o no la opción MariaDB/MySQL.
+     */
+    private static function testGlobalMysqlConnection(): bool
+    {
+        try {
+            $cfg = MysqlAppConfig::get();
+            if (!empty($cfg['connection_tested_ok'])) {
+                return true;
+            }
+            if (empty($cfg['host']) || empty($cfg['database'])) {
+                return false;
+            }
+            $dsn = "mysql:host={$cfg['host']};port=" . ($cfg['port'] ?? 3306) . ";dbname={$cfg['database']};charset=utf8mb4";
+            $pdo = new PDO($dsn, $cfg['user'] ?? '', $cfg['password'] ?? '', [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_TIMEOUT => 3,
+            ]);
+            $pdo->query('SELECT 1');
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
 }
 

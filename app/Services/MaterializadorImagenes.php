@@ -39,22 +39,27 @@ class MaterializadorImagenes
         }
     }
 
+    /**
+     * Comprueba si ya existe una imagen con este MD5 (content_md5 o raw_md5) en el workspace actual.
+     */
     private function yaExisteMd5(string $md5): bool
     {
         $md5 = strtolower(trim($md5));
-        if ($md5 === '') return false;
+        if (strlen($md5) !== 32) return false;
 
         // Dedupe rápido dentro del mismo registro/ejecución
         if (isset($this->seenMd5[$md5])) {
             return true;
         }
 
-        // Dedupe global contra SQLite (si ya fue indexada y tiene content_md5)
+        // Dedupe global contra el índice (content_md5 del archivo o raw_md5 de la imagen tal cual vino de la BD)
         try {
-            $pdo = SqliteConnection::get();
-            SqliteSchema::ensure($pdo);
-            $stmt = $pdo->prepare("SELECT 1 FROM images WHERE content_md5 = :m LIMIT 1");
-            $stmt->execute([':m' => $md5]);
+            $pdo = AppConnection::get();
+            AppSchema::ensure($pdo);
+            $tImg = AppConnection::table('images');
+            $ws = AppConnection::currentSlug() ?? 'default';
+            $stmt = $pdo->prepare("SELECT 1 FROM {$tImg} WHERE workspace_slug = :ws AND (content_md5 = :m OR raw_md5 = :m2) LIMIT 1");
+            $stmt->execute([':ws' => $ws, ':m' => $md5, ':m2' => $md5]);
             $exists = ($stmt->fetchColumn() !== false);
             if ($exists) return true;
         } catch (\Throwable $e) {
@@ -302,7 +307,8 @@ class MaterializadorImagenes
     }
     
     /**
-     * Materializa una imagen desde datos de base de datos
+     * Materializa una imagen desde datos de base de datos.
+     * Primer paso: dedupe con la imagen tal cual viene de la BD (raw). Si pasa, continúa materialización y optimización.
      */
     public function materializarImagen($datosImagen, $nombreBase, $fechaCreacion = null, $identificador = '', $resultado = '', $usrId = '')
     {
@@ -314,8 +320,26 @@ class MaterializadorImagenes
         }
 
         try {
-            // Extraer binario y validar formato: solo JPG, JPEG, PNG; HEIC se convierte a JPG
-            $datosBinarios = $this->extraerDatosImagen($datosImagen);
+            // 1) Extraer binario tal cual viene de la BD (antes de conversión/compresión)
+            $datosBinariosRaw = $this->extraerDatosImagen($datosImagen);
+            $rawMd5 = md5($datosBinariosRaw);
+            $rawMd5 = strtolower($rawMd5);
+
+            // 2) Primer proceso: dedupe con la imagen raw. Si ya existe, omitir sin materializar ni optimizar.
+            if ($this->yaExisteMd5($rawMd5)) {
+                $this->seenMd5[$rawMd5] = true;
+                return [
+                    'success' => true,
+                    'duplicate' => true,
+                    'md5' => $rawMd5,
+                    'raw_md5' => $rawMd5,
+                    'mensaje' => 'Imagen duplicada (MD5 raw). Omitida.'
+                ];
+            }
+            $this->seenMd5[$rawMd5] = true;
+
+            // 3) Continuar con formato, conversión HEIC y validación
+            $datosBinarios = $datosBinariosRaw;
             $mime = $this->detectarMimeDesdeBinario($datosBinarios);
             if ($mime === null || strpos($mime, 'image/') !== 0) {
                 return [
@@ -394,14 +418,15 @@ class MaterializadorImagenes
                 $toSave = $compressed;
             }
 
-            // Calcular MD5 (dedupe) con los datos a guardar
+            // Calcular MD5 del archivo a guardar (por si el mismo contenido comprimido ya existía)
             $md5 = md5($toSave);
             if ($this->yaExisteMd5($md5)) {
                 return [
                     'success' => true,
                     'duplicate' => true,
                     'md5' => $md5,
-                    'mensaje' => 'Imagen duplicada (MD5). Omitida.'
+                    'raw_md5' => $rawMd5,
+                    'mensaje' => 'Imagen duplicada (MD5 archivo). Omitida.'
                 ];
             }
             $this->seenMd5[$md5] = true;
@@ -421,7 +446,8 @@ class MaterializadorImagenes
                 'ruta' => $rutaCompleta,
                 'nombre' => $nombreArchivo,
                 'directorio' => $directorioDestino,
-                'md5' => $md5
+                'md5' => $md5,
+                'raw_md5' => $rawMd5
             ];
         } catch (\Exception $e) {
             return [

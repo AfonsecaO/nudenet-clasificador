@@ -5,8 +5,8 @@ namespace App\Controllers;
 use App\Models\ImagenesIndex;
 use App\Services\HeicConverter;
 use App\Services\LogService;
-use App\Services\SqliteConnection;
-use App\Services\SqliteSchema;
+use App\Services\AppConnection;
+use App\Services\AppSchema;
 use App\Services\WorkspaceService;
 
 class UploadController extends BaseController
@@ -141,9 +141,10 @@ class UploadController extends BaseController
                 $this->jsonResponse(['success' => false, 'error' => 'No se recibieron archivos válidos'], 400);
             }
 
-            $pdo = SqliteConnection::get();
-            SqliteSchema::ensure($pdo);
-            $stmtMd5 = $pdo->prepare("SELECT ruta_relativa FROM images WHERE content_md5 = :m LIMIT 1");
+            $pdo = AppConnection::get();
+            AppSchema::ensure($pdo);
+            $tImg = AppConnection::table('images');
+            $stmtMd5 = $pdo->prepare("SELECT ruta_relativa FROM {$tImg} WHERE content_md5 = :m LIMIT 1");
 
             $savedPaths = [];
 

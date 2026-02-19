@@ -33,7 +33,7 @@ class BaseController
         }
 
         // Soporte de layout: la vista puede poblar $__head / $__title / $__bodyClass
-        $__title = $data['title'] ?? ($__title ?? null) ?? 'Clasificador';
+        $__title = $data['title'] ?? ($__title ?? null) ?? 'PhotoClassifier';
         $__head = $data['head'] ?? ($__head ?? '');
         $__bodyClass = $data['bodyClass'] ?? ($__bodyClass ?? '');
 

@@ -42,8 +42,8 @@ class ConfigService
     public static function cargarYValidar()
     {
         // Asegurar schema
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
 
         $faltantes = self::faltantesRequeridos();
         if (!empty($faltantes)) {
@@ -63,8 +63,8 @@ class ConfigService
 
     public static function faltantesRequeridos(): array
     {
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
 
         $faltantes = [];
         // Requeridos mínimos
@@ -121,43 +121,141 @@ class ConfigService
 
     public static function get(string $parametro): ?string
     {
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
-        $stmt = $pdo->prepare('SELECT value FROM app_config WHERE key = :k');
-        $stmt->execute([':k' => $parametro]);
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
+        $ws = AppConnection::currentSlug() ?? 'default';
+        $t = AppConnection::table('app_config');
+        $driver = AppConnection::getCurrentDriver();
+        // Buscar por clave exacta primero
+        $stmt = $pdo->prepare($driver === 'mysql'
+            ? "SELECT value FROM {$t} WHERE workspace_slug = :ws AND `key` = :k LIMIT 1"
+            : "SELECT value FROM {$t} WHERE workspace_slug = :ws AND key = :k LIMIT 1");
+        $stmt->execute([':ws' => $ws, ':k' => $parametro]);
         $v = $stmt->fetchColumn();
-        return ($v === false) ? null : (string)$v;
+        if ($v !== false) return (string)$v;
+        // Compatibilidad: si no hay fila con clave exacta, buscar por clave canónica (evita duplicados por capitalización)
+        $kCanonical = self::normalizarKey($parametro);
+        if ($kCanonical === '') return null;
+        $stmt2 = $pdo->prepare($driver === 'mysql'
+            ? "SELECT value FROM {$t} WHERE workspace_slug = :ws AND UPPER(TRIM(`key`)) = :k LIMIT 1"
+            : "SELECT value FROM {$t} WHERE workspace_slug = :ws AND UPPER(TRIM(key)) = :k LIMIT 1");
+        $stmt2->execute([':ws' => $ws, ':k' => $kCanonical]);
+        $v2 = $stmt2->fetchColumn();
+        return ($v2 === false) ? null : (string)$v2;
+    }
+
+    /**
+     * Clave canónica para app_config: mayúsculas y trim (evita duplicados por capitalización).
+     */
+    public static function normalizarKey(string $parametro): string
+    {
+        return strtoupper(trim($parametro));
     }
 
     public static function set(string $parametro, $valor): void
     {
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
-        $stmt = $pdo->prepare("
-            INSERT INTO app_config(key, value, updated_at)
-            VALUES(:k, :v, :t)
-            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-        ");
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
+        $ws = AppConnection::currentSlug() ?? 'default';
+        $t = AppConnection::table('app_config');
+        $kCanonical = self::normalizarKey($parametro);
+        if ($kCanonical === '') return;
+
+        $driver = AppConnection::getCurrentDriver();
+        $now = date('Y-m-d H:i:s');
+        if ($driver === 'mysql') {
+            $stmt = $pdo->prepare("
+                INSERT INTO {$t} (workspace_slug, `key`, value, updated_at) VALUES (:ws, :k, :v, :t)
+                ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)
+            ");
+        } else {
+            $stmt = $pdo->prepare("
+                INSERT INTO {$t} (workspace_slug, key, value, updated_at) VALUES (:ws, :k, :v, :t)
+                ON CONFLICT(workspace_slug, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+            ");
+        }
         $stmt->execute([
-            ':k' => $parametro,
+            ':ws' => $ws,
+            ':k' => $kCanonical,
             ':v' => (string)$valor,
-            ':t' => date('Y-m-d H:i:s')
+            ':t' => $now
         ]);
+
+        // Eliminar filas duplicadas por distinta capitalización (misma clave lógica)
+        if ($driver === 'mysql') {
+            $del = $pdo->prepare("DELETE FROM {$t} WHERE workspace_slug = :ws AND `key` <> :k AND UPPER(TRIM(`key`)) = :k_canon");
+            $del->execute([':ws' => $ws, ':k' => $kCanonical, ':k_canon' => $kCanonical]);
+        } else {
+            $del = $pdo->prepare("DELETE FROM {$t} WHERE workspace_slug = :ws AND key <> :k AND UPPER(TRIM(key)) = :k_canon");
+            $del->execute([':ws' => $ws, ':k' => $kCanonical, ':k_canon' => $kCanonical]);
+        }
     }
 
     public static function setMany(array $pairs): void
     {
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
         $pdo->beginTransaction();
         try {
             foreach ($pairs as $k => $v) {
                 if (!is_string($k) || $k === '') continue;
                 self::set($k, $v);
             }
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Elimina filas duplicadas en app_config para un workspace (misma clave exacta o misma clave canónica).
+     * Deja una sola fila por clave canónica (mayúsculas). Seguro aunque la tabla tenga filas duplicadas.
+     */
+    public static function dedupeAppConfigForWorkspace(string $workspaceSlug): void
+    {
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
+        $t = AppConnection::table('app_config');
+        $driver = AppConnection::getCurrentDriver();
+        $keyCol = $driver === 'mysql' ? '`key`' : 'key';
+        $stmt = $pdo->prepare("SELECT {$keyCol}, value, updated_at FROM {$t} WHERE workspace_slug = :ws ORDER BY updated_at DESC");
+        $stmt->execute([':ws' => $workspaceSlug]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        // Una entrada por clave canónica; si hay varias filas con la misma clave, nos quedamos con la más reciente (updated_at DESC)
+        $byCanonical = [];
+        foreach ($rows as $r) {
+            $k = (string)($r['key'] ?? '');
+            $c = self::normalizarKey($k);
+            if ($c === '') continue;
+            if (!isset($byCanonical[$c])) {
+                $byCanonical[$c] = ['value' => (string)($r['value'] ?? ''), 'updated_at' => (string)($r['updated_at'] ?? '')];
+            }
+        }
+        $now = date('Y-m-d H:i:s');
+        $pdo->beginTransaction();
+        try {
+            if ($driver === 'mysql') {
+                $delAll = $pdo->prepare("DELETE FROM {$t} WHERE workspace_slug = :ws");
+                $delAll->execute([':ws' => $workspaceSlug]);
+                $ins = $pdo->prepare("INSERT INTO {$t} (workspace_slug, `key`, value, updated_at) VALUES (:ws, :k, :v, :t)");
+            } else {
+                $delAll = $pdo->prepare("DELETE FROM {$t} WHERE workspace_slug = :ws");
+                $delAll->execute([':ws' => $workspaceSlug]);
+                $ins = $pdo->prepare("INSERT INTO {$t} (workspace_slug, key, value, updated_at) VALUES (:ws, :k, :v, :t)");
+            }
+            foreach ($byCanonical as $canon => $one) {
+                $ins->execute([':ws' => $workspaceSlug, ':k' => $canon, ':v' => $one['value'], ':t' => $one['updated_at'] ?: $now]);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             throw $e;
         }
     }

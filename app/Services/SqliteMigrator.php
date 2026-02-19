@@ -13,65 +13,79 @@ class SqliteMigrator
      */
     public static function bootstrap(): void
     {
-        $sqlitePath = SqliteConnection::path();
-        $dbExists = file_exists($sqlitePath);
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
+        $driver = AppConnection::getCurrentDriver();
+        $dbExists = ($driver === 'sqlite') ? file_exists(AppConnection::path()) : true;
 
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
-
-        $done = SqliteSchema::metaGet($pdo, 'migration_done', '0');
+        $done = AppSchema::metaGet($pdo, 'migration_done', '0');
         if ($done === '1') {
-            // Post-migración: asegurar folders si aún no se han construido
             self::ensureFoldersIndex($pdo);
             return;
         }
 
         if ($dbExists) {
-            SqliteSchema::metaSet($pdo, 'migration_done', '1');
+            AppSchema::metaSet($pdo, 'migration_done', '1');
             return;
         }
     }
 
     private static function ensureFoldersIndex(PDO $pdo): void
     {
-        $built = SqliteSchema::metaGet($pdo, 'folders_built', '0');
-        $countFolders = (int)$pdo->query("SELECT COUNT(*) FROM folders")->fetchColumn();
+        $ws = AppConnection::currentSlug() ?? 'default';
+        $tFolders = AppConnection::table('folders');
+        $tImages = AppConnection::table('images');
+        $built = AppSchema::metaGet($pdo, 'folders_built', '0', $ws);
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$tFolders} WHERE workspace_slug = :ws");
+        $stmt->execute([':ws' => $ws]);
+        $countFolders = (int)$stmt->fetchColumn();
 
-        // Si ya está construido pero hay nombres vacíos, reconstruir (fix)
         if ($built === '1' && $countFolders > 0) {
-            $hayVacios = (int)$pdo->query("SELECT COUNT(*) FROM folders WHERE COALESCE(nombre,'') = ''")->fetchColumn();
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$tFolders} WHERE workspace_slug = :ws AND COALESCE(nombre,'') = ''");
+            $stmt->execute([':ws' => $ws]);
+            $hayVacios = (int)$stmt->fetchColumn();
             if ($hayVacios === 0) {
                 return;
             }
         }
 
-        $countImages = (int)$pdo->query("SELECT COUNT(*) FROM images")->fetchColumn();
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = :ws");
+        $stmt->execute([':ws' => $ws]);
+        $countImages = (int)$stmt->fetchColumn();
         if ($countImages === 0) {
-            // Nada que construir
-            SqliteSchema::metaSet($pdo, 'folders_built', '1');
+            AppSchema::metaSet($pdo, 'folders_built', '1', $ws);
             return;
         }
 
         $ahora = date('Y-m-d H:i:s');
+        $driver = AppConnection::getCurrentDriver();
         $pdo->beginTransaction();
         try {
-            $pdo->exec("DELETE FROM folders");
-
-            $rows = $pdo->query("
-                SELECT COALESCE(ruta_carpeta, '') as ruta, COUNT(*) as total
-                FROM images
-                GROUP BY COALESCE(ruta_carpeta, '')
-            ")->fetchAll();
+            $del = $pdo->prepare("DELETE FROM {$tFolders} WHERE workspace_slug = :ws");
+            $del->execute([':ws' => $ws]);
 
             $stmt = $pdo->prepare("
-                INSERT INTO folders(ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
-                VALUES(:ruta, :nombre, :search_key, :total, :t)
-                ON CONFLICT(ruta_carpeta) DO UPDATE SET
-                  nombre=excluded.nombre,
-                  search_key=excluded.search_key,
-                  total_imagenes=excluded.total_imagenes,
-                  actualizada_en=excluded.actualizada_en
+                SELECT COALESCE(ruta_carpeta, '') as ruta, COUNT(*) as total
+                FROM {$tImages}
+                WHERE workspace_slug = :ws
+                GROUP BY COALESCE(ruta_carpeta, '')
             ");
+            $stmt->execute([':ws' => $ws]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($driver === 'mysql') {
+                $stmt = $pdo->prepare("
+                    INSERT INTO {$tFolders}(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+                    VALUES(:ws, :ruta, :nombre, :search_key, :total, :t)
+                    ON DUPLICATE KEY UPDATE nombre=VALUES(nombre), search_key=VALUES(search_key), total_imagenes=VALUES(total_imagenes), actualizada_en=VALUES(actualizada_en)
+                ");
+            } else {
+                $stmt = $pdo->prepare("
+                    INSERT INTO {$tFolders}(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+                    VALUES(:ws, :ruta, :nombre, :search_key, :total, :t)
+                    ON CONFLICT(workspace_slug, ruta_carpeta) DO UPDATE SET nombre=excluded.nombre, search_key=excluded.search_key, total_imagenes=excluded.total_imagenes, actualizada_en=excluded.actualizada_en
+                ");
+            }
 
             foreach ($rows as $r) {
                 $ruta = (string)($r['ruta'] ?? '');
@@ -79,6 +93,7 @@ class SqliteMigrator
                 $nombre = ($ruta === '') ? '' : self::basenameRuta($ruta);
                 $searchKey = StringNormalizer::toSearchKey($ruta . ' ' . $nombre);
                 $stmt->execute([
+                    ':ws' => $ws,
                     ':ruta' => $ruta,
                     ':nombre' => $nombre,
                     ':search_key' => $searchKey,
@@ -86,10 +101,14 @@ class SqliteMigrator
                     ':t' => $ahora
                 ]);
             }
-            $pdo->commit();
-            SqliteSchema::metaSet($pdo, 'folders_built', '1');
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
+            AppSchema::metaSet($pdo, 'folders_built', '1', $ws);
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             // No bloquear la app por este rebuild; se puede intentar luego
         }
     }
@@ -105,7 +124,7 @@ class SqliteMigrator
     private static function migrateAll(PDO $pdo, string $jsonTablas, string $jsonImagenes, string $jsonCarpetas): void
     {
         // Acelerar bulk load
-        SqliteConnection::tuneForBulkLoad($pdo);
+        AppConnection::tuneForBulkLoad($pdo);
 
         $pdo->beginTransaction();
         try {
@@ -126,10 +145,10 @@ class SqliteMigrator
         // Carpetas: no es crítico; se puede reconstruir desde images más adelante.
         // Guardar timestamp en meta si existe.
         if (file_exists($jsonCarpetas)) {
-            SqliteSchema::metaSet($pdo, 'carpetas_json_present', '1');
+            AppSchema::metaSet($pdo, 'carpetas_json_present', '1');
         }
 
-        SqliteConnection::tuneForRuntime($pdo);
+        AppConnection::tuneForRuntime($pdo);
     }
 
     private static function migrateTablas(PDO $pdo, string $path): void
@@ -171,10 +190,10 @@ class SqliteMigrator
         // tables_index + meta
         if (is_array($indice)) {
             if (isset($indice['pattern'])) {
-                SqliteSchema::metaSet($pdo, 'tables_pattern', (string)$indice['pattern']);
+                AppSchema::metaSet($pdo, 'tables_pattern', (string)$indice['pattern']);
             }
             if (isset($indice['actualizada_en'])) {
-                SqliteSchema::metaSet($pdo, 'tables_index_updated_at', (string)$indice['actualizada_en']);
+                AppSchema::metaSet($pdo, 'tables_index_updated_at', (string)$indice['actualizada_en']);
             }
             $tablas = $indice['tablas'] ?? [];
             if (is_array($tablas)) {
@@ -201,9 +220,12 @@ class SqliteMigrator
         $fh = @fopen($path, 'rb');
         if (!$fh) return;
 
-        // Preparar statements
-        $stmtImg = $pdo->prepare("
-            INSERT INTO images(
+        $tImages = AppConnection::table('images');
+        $tDetections = AppConnection::table('detections');
+        $driver = AppConnection::getCurrentDriver();
+
+        $sqlImg = "
+            INSERT INTO {$tImages}(
               ruta_relativa, ruta_completa, ruta_carpeta, archivo,
               indexada, indexada_en, actualizada_en, mtime, tamano,
               clasif_estado, safe, unsafe, resultado, clasif_error, clasif_en,
@@ -213,35 +235,34 @@ class SqliteMigrator
               :indexada, :indexada_en, :actualizada_en, :mtime, :tamano,
               :clasif_estado, :safe, :unsafe, :resultado, :clasif_error, :clasif_en,
               :detect_requerida, :detect_estado, :detect_error, :detect_en
-            )
-            ON CONFLICT(ruta_relativa) DO UPDATE SET
-              ruta_completa=excluded.ruta_completa,
-              ruta_carpeta=excluded.ruta_carpeta,
-              archivo=excluded.archivo,
-              indexada=excluded.indexada,
-              indexada_en=excluded.indexada_en,
-              actualizada_en=excluded.actualizada_en,
-              mtime=excluded.mtime,
-              tamano=excluded.tamano,
-              clasif_estado=excluded.clasif_estado,
-              safe=excluded.safe,
-              unsafe=excluded.unsafe,
-              resultado=excluded.resultado,
-              clasif_error=excluded.clasif_error,
-              clasif_en=excluded.clasif_en,
-              detect_requerida=excluded.detect_requerida,
-              detect_estado=excluded.detect_estado,
-              detect_error=excluded.detect_error,
-              detect_en=excluded.detect_en
-        ");
+            )";
+        if ($driver === 'mysql') {
+            $sqlImg .= " ON DUPLICATE KEY UPDATE
+              ruta_completa=VALUES(ruta_completa), ruta_carpeta=VALUES(ruta_carpeta), archivo=VALUES(archivo),
+              indexada=VALUES(indexada), indexada_en=VALUES(indexada_en), actualizada_en=VALUES(actualizada_en),
+              mtime=VALUES(mtime), tamano=VALUES(tamano), clasif_estado=VALUES(clasif_estado),
+              safe=VALUES(safe), unsafe=VALUES(unsafe), resultado=VALUES(resultado),
+              clasif_error=VALUES(clasif_error), clasif_en=VALUES(clasif_en),
+              detect_requerida=VALUES(detect_requerida), detect_estado=VALUES(detect_estado),
+              detect_error=VALUES(detect_error), detect_en=VALUES(detect_en)";
+        } else {
+            $sqlImg .= " ON CONFLICT(ruta_relativa) DO UPDATE SET
+              ruta_completa=excluded.ruta_completa, ruta_carpeta=excluded.ruta_carpeta, archivo=excluded.archivo,
+              indexada=excluded.indexada, indexada_en=excluded.indexada_en, actualizada_en=excluded.actualizada_en,
+              mtime=excluded.mtime, tamano=excluded.tamano, clasif_estado=excluded.clasif_estado,
+              safe=excluded.safe, unsafe=excluded.unsafe, resultado=excluded.resultado,
+              clasif_error=excluded.clasif_error, clasif_en=excluded.clasif_en,
+              detect_requerida=excluded.detect_requerida, detect_estado=excluded.detect_estado,
+              detect_error=excluded.detect_error, detect_en=excluded.detect_en";
+        }
+        $stmtImg = $pdo->prepare($sqlImg);
 
         $stmtDet = $pdo->prepare("
-            INSERT INTO detections(image_ruta_relativa, label, score, x1, y1, x2, y2)
+            INSERT INTO {$tDetections}(image_ruta_relativa, label, score, x1, y1, x2, y2)
             VALUES(:img, :label, :score, :x1, :y1, :x2, :y2)
         ");
 
-        // Limpiar detections para evitar duplicados
-        $pdo->exec("DELETE FROM detections");
+        $pdo->exec("DELETE FROM {$tDetections}");
 
         $inImagenes = false;
         $reading = false;
@@ -306,7 +327,7 @@ class SqliteMigrator
         fclose($fh);
 
         // Guardar info meta
-        SqliteSchema::metaSet($pdo, 'images_migrated_at', date('Y-m-d H:i:s'));
+        AppSchema::metaSet($pdo, 'images_migrated_at', date('Y-m-d H:i:s'));
     }
 
     private static function insertImageRecord($stmtImg, $stmtDet, string $rutaRelativa, array $r): void

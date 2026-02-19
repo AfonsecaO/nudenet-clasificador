@@ -38,12 +38,13 @@ $__colUsr = trim((string)($values['CAMPO_USR_ID'] ?? ''));
 $__colRes = trim((string)($values['CAMPO_RESULTADO'] ?? ''));
 $__colFecha = trim((string)($values['CAMPO_FECHA'] ?? ''));
 $__patronDisplay = preg_replace('/\.ext\s*$/i', '', trim((string)($values['PATRON_MATERIALIZACION'] ?? '')));
+$__mysqlGlobalAvailable = !empty($mysql_global_available);
 ?>
 
 <nav class="topnav">
-  <a href="?action=index" class="topnav-brand"><i class="fas fa-shield-alt"></i> Clasificador</a>
+  <a href="?action=index" class="topnav-brand"><i class="fas fa-shield-alt"></i> PhotoClassifier</a>
   <ul class="topnav-links">
-    <li><a href="?action=index"><i class="fas fa-layer-group"></i> <?php echo $__wsSlug ? htmlspecialchars($__wsSlug, ENT_QUOTES) : '—'; ?></a></li>
+    <li><a href="?action=index"><i class="fas fa-layer-group"></i> <?php echo $__wsSlug ? htmlspecialchars(mb_strtoupper($__wsSlug), ENT_QUOTES) : '—'; ?></a></li>
     <li><a href="?action=setup" class="active"><i class="fas fa-cog"></i> Parametrización</a></li>
     <li><a href="?action=workspace_select"><i class="fas fa-layer-group"></i> Workspaces</a></li>
   </ul>
@@ -71,44 +72,24 @@ $__patronDisplay = preg_replace('/\.ext\s*$/i', '', trim((string)($values['PATRO
           <div class="card-header">
             <h3 class="card-title"><i class="fas fa-layer-group"></i> Workspace</h3>
           </div>
-              <div class="card-body">
-                <div class="custom-control custom-radio">
-                  <input class="custom-control-input" type="radio" id="modeImagesOnly" name="WORKSPACE_MODE" value="images_only" <?php echo $__mode === 'images_only' ? 'checked' : ''; ?>>
-                  <label for="modeImagesOnly" class="custom-control-label">Solo imágenes</label>
-                </div>
-                <div class="custom-control custom-radio">
-                  <input class="custom-control-input" type="radio" id="modeDbAndImages" name="WORKSPACE_MODE" value="db_and_images" <?php echo $__mode === 'db_and_images' ? 'checked' : ''; ?>>
-                  <label for="modeDbAndImages" class="custom-control-label">DB + imágenes</label>
-                </div>
-                <?php if ($__imagesDir): ?>
-                  <div class="mt-2 text-muted small">
-                    Directorio fijo de imágenes: <span class="text-monospace"><?php echo htmlspecialchars($__imagesDir, ENT_QUOTES); ?></span>
-                  </div>
-                <?php endif; ?>
-              </div>
+          <div class="card-body">
+            <div class="custom-control custom-radio">
+              <input class="custom-control-input" type="radio" id="modeImagesOnly" name="WORKSPACE_MODE" value="images_only" <?php echo $__mode === 'images_only' ? 'checked' : ''; ?>>
+              <label for="modeImagesOnly" class="custom-control-label">Solo imágenes</label>
             </div>
-          </div>
-
-          <div class="col-12 col-lg-6">
-            <div class="card card">
-              <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-images"></i> Imágenes (directorio)</h3>
-              </div>
-              <div class="card-body">
-                <div class="text-muted small">
-                  Directorio base fijo: <span class="text-monospace">workspaces/&lt;ws&gt;/images</span>
-                </div>
-                <div class="alert alert-light mt-2 mb-0" id="patronImagesOnlyInfo">
-                  <?php if ($__mode === 'images_only'): ?>
-                    Se conserva la estructura de carpetas al subir. No se usa patrón de materialización.
-                  <?php else: ?>
-                    Las imágenes se materializan según el patrón configurado más abajo.
-                  <?php endif; ?>
-                </div>
-              </div>
+            <div class="custom-control custom-radio">
+              <input class="custom-control-input" type="radio" id="modeDbAndImages" name="WORKSPACE_MODE" value="db_and_images" <?php echo $__mode === 'db_and_images' ? 'checked' : ''; ?>>
+              <label for="modeDbAndImages" class="custom-control-label">DB + imágenes</label>
             </div>
+            <?php if ($__imagesDir): ?>
+              <div class="mt-2 text-muted small">
+                Directorio fijo de imágenes: <span class="text-monospace"><?php echo htmlspecialchars($__imagesDir, ENT_QUOTES); ?></span>
+              </div>
+            <?php endif; ?>
           </div>
         </div>
+      </div>
+    </div>
 
         <div class="row <?php echo $__mode === 'images_only' ? 'd-none' : ''; ?>" id="setupDbSection">
           <div class="col-12">

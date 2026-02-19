@@ -87,10 +87,16 @@ class Router
             $route = self::getCurrentRoute();
 
             // Landing rule: al entrar por "/" (sin ?action=...), siempre mostrar selector de workspace.
-            // Esto permite que el usuario elija explícitamente el workspace en cada entrada a la app.
             $isLanding = !isset($_GET['action']) || trim((string)($_GET['action'] ?? '')) === '';
             if ($isLanding && (string)$route === 'index') {
                 $route = 'workspace_select';
+            }
+
+            // Wizard = parametrización global: si no existe database/storage_engine.json, forzar esa pantalla.
+            if (!\App\Services\StorageEngineConfig::storageEngineFileExists()) {
+                if ((string)$route !== 'workspace_global_config' && (string)$route !== 'workspace_global_config_save') {
+                    $route = 'workspace_global_config';
+                }
             }
 
             // Workspace por request: permite abrir varias pestañas con distintos workspaces (workers en paralelo).
@@ -165,9 +171,9 @@ class Router
                 return;
             }
 
-            // Asegurar SQLite + esquema (y migración legacy si aplica) - ya con workspace resuelto
-            $pdo = SqliteConnection::get();
-            SqliteSchema::ensure($pdo);
+            // Asegurar conexión + esquema (y migración legacy si aplica) - ya con workspace resuelto
+            $pdo = AppConnection::get();
+            AppSchema::ensure($pdo);
             SqliteMigrator::bootstrap();
 
             // Verificar si la ruta existe

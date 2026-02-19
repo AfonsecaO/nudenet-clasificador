@@ -4,7 +4,7 @@
 /** @var string $__bodyClass */
 /** @var string $__content */
 
-$__title = isset($__title) ? (string)$__title : 'Clasificador';
+$__title = isset($__title) ? (string)$__title : 'PhotoClassifier';
 $__head = isset($__head) ? (string)$__head : '';
 $__bodyClass = isset($__bodyClass) ? (string)$__bodyClass : '';
 $__content = isset($__content) ? (string)$__content : '';

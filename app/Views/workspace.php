@@ -3,7 +3,7 @@
 /** @var string|null $current */
 
 $__title = 'Seleccionar workspace';
-$__bodyClass = '';
+$__bodyClass = 'page-workspaces';
 
 $workspaces = is_array($workspaces ?? null) ? $workspaces : [];
 $current = isset($current) && is_string($current) ? $current : null;
@@ -17,9 +17,10 @@ function fmtTs($ts): string {
 ?>
 
 <nav class="topnav">
-  <a href="?action=workspace_select" class="topnav-brand"><i class="fas fa-shield-alt"></i> Clasificador</a>
+  <a href="?action=workspace_select" class="topnav-brand"><i class="fas fa-shield-alt"></i> PhotoClassifier</a>
   <ul class="topnav-links">
     <li><a href="?action=workspace_select" class="active"><i class="fas fa-layer-group"></i> Workspaces</a></li>
+    <li><a href="?action=workspace_global_config"><i class="fas fa-database"></i> Parametrización global</a></li>
     <li>
       <button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#createModal">
         <i class="fas fa-plus"></i> Crear workspace
@@ -57,6 +58,7 @@ function fmtTs($ts): string {
           $imgTotal = isset($ws['images_total']) ? (int)$ws['images_total'] : null;
           $imgPend = isset($ws['images_pending']) ? (int)$ws['images_pending'] : null;
           $detTotal = isset($ws['detections_total']) ? (int)$ws['detections_total'] : null;
+          $registrosPendDescarga = isset($ws['registros_pendientes_descarga']) ? (int)$ws['registros_pendientes_descarga'] : null;
           $createdAt = fmtTs($ws['created_at'] ?? null);
           $updatedAt = (string)($ws['updated_at'] ?? '');
           $modeLabel = ($mode === 'db_and_images') ? 'DB + imágenes' : (($mode === 'images_only') ? 'Solo imágenes' : 'Sin configurar');
@@ -73,20 +75,25 @@ function fmtTs($ts): string {
                   <span class="ws-card-badge-current">Actual</span>
                 <?php endif; ?>
               </div>
-              <button class="ws-card-delete btn btn-link btn-sm btnDeleteWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Eliminar workspace" aria-label="Eliminar <?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
-                <i class="fas fa-trash-alt"></i>
-              </button>
+              <div class="ws-card-top-right">
+                <span class="ws-card-created">Creado <?php echo htmlspecialchars($createdAt, ENT_QUOTES); ?></span>
+                <button class="ws-card-delete btn btn-link btn-sm btnDeleteWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Eliminar workspace" aria-label="Eliminar <?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
+                  <i class="fas fa-trash-alt"></i>
+                </button>
+              </div>
             </div>
-            <p class="ws-card-path">workspaces/<?php echo htmlspecialchars($slug, ENT_QUOTES); ?> <span class="ws-card-created">· Creado <?php echo htmlspecialchars($createdAt, ENT_QUOTES); ?></span></p>
             <div class="ws-card-badges">
               <span class="ws-badge ws-badge--<?php echo $configured ? 'ok' : 'warn'; ?>"><?php echo $configured ? 'Configurado' : 'Pendiente'; ?></span>
               <span class="ws-badge ws-badge--mode"><?php echo htmlspecialchars($modeLabel, ENT_QUOTES); ?></span>
             </div>
-            <?php if ($imgTotal !== null || $imgPend !== null || $detTotal !== null): ?>
+            <?php if ($imgTotal !== null || $imgPend !== null || $detTotal !== null || $registrosPendDescarga !== null): ?>
             <div class="ws-card-stats" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
               <div class="ws-stat"><span class="ws-stat-num" data-stat="images"><?php echo $imgTotal !== null ? number_format($imgTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-image"></i> Imágenes</span></div>
               <div class="ws-stat"><span class="ws-stat-num" data-stat="pending"><?php echo $imgPend !== null ? number_format($imgPend) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-hourglass-half"></i> Pendientes</span></div>
               <div class="ws-stat"><span class="ws-stat-num" data-stat="detections"><?php echo $detTotal !== null ? number_format($detTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-robot"></i> Detecciones</span></div>
+              <?php if ($mode === 'db_and_images' && $registrosPendDescarga !== null): ?>
+              <div class="ws-stat ws-stat-full"><span class="ws-stat-num" data-stat="registros-descarga"><?php echo number_format($registrosPendDescarga); ?></span><span class="ws-stat-lbl"><i class="fas fa-download"></i> Registros por descargar</span></div>
+              <?php endif; ?>
             </div>
             <?php endif; ?>
             <div class="ws-card-actions">
@@ -111,6 +118,7 @@ function fmtTs($ts): string {
         </article>
       <?php endforeach; ?>
     </div>
+    <div class="ws-grid-spacer" aria-hidden="true"></div>
       </div>
       <div class="col-lg-4 col-md-12 ws-search-col mb-3 mb-lg-0">
         <div class="ws-search-consolidado" id="wsSearchConsolidado">
@@ -149,6 +157,18 @@ function fmtTs($ts): string {
           <input type="text" class="form-control" id="wsCreateName" placeholder="ej: produccion, pruebas-1">
           <small class="form-text text-muted">Se convertirá a slug.</small>
         </div>
+        <?php if (!empty($workspaces)): ?>
+        <div class="form-group">
+          <label for="wsCreateCopyConfig">Copiar configuración de</label>
+          <select class="form-control" id="wsCreateCopyConfig">
+            <option value="">No copiar (empezar sin parametrización)</option>
+            <?php foreach ($workspaces as $w): $s = (string)($w['slug'] ?? ''); if ($s === '') continue; ?>
+            <option value="<?php echo htmlspecialchars($s, ENT_QUOTES); ?>"><?php echo htmlspecialchars($s, ENT_QUOTES); ?></option>
+            <?php endforeach; ?>
+          </select>
+          <small class="form-text text-muted">Opcional. Copia la parametrización (DB, clasificador, etc.) de otro workspace. Luego puedes editarla.</small>
+        </div>
+        <?php endif; ?>
         <div class="alert alert-light mb-0">
           Se creará: <span class="text-monospace">workspaces/&lt;workspace&gt;/db, images, logs, cache</span>
         </div>
@@ -349,6 +369,11 @@ function fmtTs($ts): string {
       const url = apiUrlWs('procesar_imagenes', ws);
       const { ok, data } = await getJson(url);
       if (!ok || !data?.success || !classifyQueue.has(ws)) break;
+      if (data?.stopped_due_to_classifier_error) {
+        classifyQueue.delete(ws);
+        updateProcessingPanel();
+        break;
+      }
       const pending = data?.pendientes ?? data?.pending ?? 0;
       const total = data?.total ?? 0;
       const procesadas = data?.procesadas ?? 0;
@@ -647,7 +672,10 @@ function fmtTs($ts): string {
       setStatus(stCreateText, 'neutral', 'Creando…');
       btnCreate.disabled = true;
       try {
-        const { ok, data } = await postJson('workspace_create', { name });
+        const copyFrom = (document.getElementById('wsCreateCopyConfig') || {}).value || '';
+        const payload = { name };
+        if (copyFrom) payload.copy_config_from = copyFrom;
+        const { ok, data } = await postJson('workspace_create', payload);
         if (!ok || !data.success) {
           setStatus(stCreateText, 'bad', data.error || 'Error');
           return;
@@ -973,8 +1001,16 @@ function fmtTs($ts): string {
 
     document.querySelectorAll('#wsSearchAcordeon .acordeon-item').forEach((item) => {
       const header = item.querySelector('.acordeon-header');
+      const body = item.querySelector('.acordeon-body');
       const quien = item.getAttribute('data-acordeon');
       if (header && quien) header.addEventListener('click', () => expandirBuscadorGlobal(quien));
+      if (body && quien) {
+        body.addEventListener('click', () => {
+          const acordeon = document.getElementById('wsSearchAcordeon');
+          if (!acordeon) return;
+          if (!acordeon.classList.contains('expanded-' + quien)) expandirBuscadorGlobal(quien);
+        });
+      }
     });
 
     loadEtiquetasGlobal();

@@ -7,7 +7,7 @@
 /** @var string|null $app_workspace_slug */
 /** @var string|null $auto_param */
 
-$__title = 'Clasificador';
+$__title = 'PhotoClassifier';
 $app_workspace_slug = $app_workspace_slug ?? null;
 $auto_param = $auto_param ?? null;
 $__bodyClass = '';
@@ -28,9 +28,9 @@ function pct($n, $d): int {
 ?>
 
 <nav class="topnav">
-  <a href="?action=index" class="topnav-brand"><i class="fas fa-shield-alt"></i> Clasificador</a>
+  <a href="?action=index" class="topnav-brand"><i class="fas fa-shield-alt"></i> PhotoClassifier</a>
   <ul class="topnav-links">
-    <li><a href="?action=index" class="active"><i class="fas fa-layer-group"></i> <?php echo $wsSlug ? h($wsSlug) : '—'; ?></a></li>
+    <li><a href="?action=index" class="active"><i class="fas fa-layer-group"></i> <?php echo $wsSlug ? h(mb_strtoupper($wsSlug)) : '—'; ?></a></li>
     <li><a href="?action=setup"><i class="fas fa-cog"></i> Parametrización</a></li>
     <li><a href="?action=workspace_select"><i class="fas fa-layer-group"></i> Workspaces</a></li>
   </ul>
@@ -697,6 +697,13 @@ function pct($n, $d): int {
       const { ok, data } = await getJson('?action=procesar_imagenes');
       if (!ok || !data?.success) {
         setStatus(stProcesar, 'bad', String(data?.error || 'Error'));
+        await refreshLogPanel();
+        return;
+      }
+      if (data?.stopped_due_to_classifier_error) {
+        setAuto(false);
+        setStatus(stProcesar, 'bad', 'Clasificador detenido por error (timeout o respuesta inválida). Revisa y vuelve a activar Auto para retomar.');
+        if (data?.stats) renderStats(data.stats);
         await refreshLogPanel();
         return;
       }
@@ -1526,7 +1533,7 @@ function pct($n, $d): int {
     if (data?.clasificacion_stats) renderStats(data.clasificacion_stats);
     if (data?.estado) renderTablasEstado(data.estado);
     await refreshLogPanel();
-    if (autoTablasRunning && data?.success && !data?.registro_procesado) {
+    if (autoTablasRunning && data?.success && !data?.registro_procesado && !data?.faltan_registros) {
       setAutoTablas(false);
     }
   }
