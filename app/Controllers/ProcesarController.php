@@ -139,6 +139,7 @@ class ProcesarController extends BaseController
                 
                 $erroresImagenes = [];
                 $rutasGuardadas = [];
+                $rawMd5PorRuta = [];
                 foreach ($resultadosImagenes as $columna => $resultadoImg) {
                     if (!empty($resultadoImg['duplicate'])) {
                         $totalDuplicadas++;
@@ -149,6 +150,9 @@ class ProcesarController extends BaseController
                         if (!empty($resultadoImg['ruta'])) {
                             $totalImagenes++;
                             $rutasGuardadas[] = $resultadoImg['ruta'];
+                            if (!empty($resultadoImg['raw_md5'])) {
+                                $rawMd5PorRuta[$resultadoImg['ruta']] = $resultadoImg['raw_md5'];
+                            }
                         }
                     } else {
                         $erroresImagenes[] = $columna . ': ' . ($resultadoImg['error'] ?? 'Error desconocido');
@@ -160,7 +164,28 @@ class ProcesarController extends BaseController
                 if (!empty($rutasGuardadas)) {
                     try {
                         $imagenesIndex = new ImagenesIndex();
-                        $imagenesIndex->upsertDesdeRutas($rutasGuardadas, ImagenesIndex::resolverDirectorioBaseImagenes());
+                        $directorioBase = ImagenesIndex::resolverDirectorioBaseImagenes();
+                        $imagenesIndex->upsertDesdeRutas($rutasGuardadas, $directorioBase);
+                        // Persistir raw_md5 en el índice para dedupe futuro (imagen tal cual viene de la BD)
+                        if (!empty($rawMd5PorRuta)) {
+                            $pdo = \App\Services\AppConnection::get();
+                            \App\Services\AppSchema::ensure($pdo);
+                            $tImg = \App\Services\AppConnection::table('images');
+                            $ws = \App\Services\AppConnection::currentSlug() ?? 'default';
+                            $driver = \App\Services\AppConnection::getCurrentDriver();
+                            $baseNorm = str_replace('\\', '/', rtrim(realpath($directorioBase) ?: $directorioBase, "/\\"));
+                            $stmtRaw = $pdo->prepare("UPDATE {$tImg} SET raw_md5 = :raw WHERE workspace_slug = :ws AND ruta_relativa = :rel");
+                            foreach ($rawMd5PorRuta as $rutaCompleta => $rawMd5) {
+                                $rutaNorm = str_replace('\\', '/', $rutaCompleta);
+                                $rel = (strpos($rutaNorm, $baseNorm . '/') === 0)
+                                    ? substr($rutaNorm, strlen($baseNorm) + 1)
+                                    : $rutaNorm;
+                                $rel = ltrim(preg_replace('#/+#', '/', $rel), '/');
+                                if ($rel !== '') {
+                                    $stmtRaw->execute([':raw' => $rawMd5, ':ws' => $ws, ':rel' => $rel]);
+                                }
+                            }
+                        }
                         $clasificacionStats = $imagenesIndex->getStats(true);
                     } catch (\Exception $e) {
                         // Silencioso: no romper descarga por fallo de índice

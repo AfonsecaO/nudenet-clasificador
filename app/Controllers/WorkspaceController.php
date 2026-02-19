@@ -2,7 +2,11 @@
 
 namespace App\Controllers;
 
+use App\Services\AppConnection;
+use App\Services\ConfigService;
+use App\Services\MysqlAppConfig;
 use App\Services\StringNormalizer;
+use App\Services\TablasLiveService;
 use App\Services\WorkspaceService;
 use PDO;
 
@@ -12,6 +16,15 @@ class WorkspaceController extends BaseController
     {
         $slugs = WorkspaceService::listWorkspaces();
         $current = WorkspaceService::current();
+
+        // Actualizar max_id solo al cargar (workspaces globales); no en medio del proceso
+        if ($current !== null && ConfigService::getWorkspaceMode() === 'db_and_images') {
+            try {
+                TablasLiveService::refrescar();
+            } catch (\Throwable $e) {
+                // Silencioso: si la BD externa falla, mostrar lista con estado previo
+            }
+        }
 
         $workspaces = [];
         foreach ($slugs as $slug) {
@@ -27,6 +40,7 @@ class WorkspaceController extends BaseController
     {
         $p = $this->payload();
         $name = isset($p['name']) ? (string)$p['name'] : '';
+        $copyConfigFrom = isset($p['copy_config_from']) ? WorkspaceService::slugify((string)$p['copy_config_from']) : '';
         $slug = WorkspaceService::slugify($name);
         if ($slug === '' || !WorkspaceService::isValidSlug($slug)) {
             $this->jsonResponse(['success' => false, 'error' => 'Nombre de workspace inválido'], 400);
@@ -36,8 +50,54 @@ class WorkspaceController extends BaseController
             $this->jsonResponse(['success' => false, 'error' => 'No se pudo crear la estructura del workspace'], 500);
         }
 
+        if ($copyConfigFrom !== '' && $copyConfigFrom !== $slug && WorkspaceService::exists($copyConfigFrom)) {
+            $this->copiarConfiguracionDesde($copyConfigFrom, $slug);
+        }
+
         WorkspaceService::setCurrent($slug);
         $this->jsonResponse(['success' => true, 'workspace' => $slug]);
+    }
+
+    /**
+     * Copia la parametrización del workspace origen al destino.
+     * Normaliza claves a mayúsculas para evitar duplicados por capitalización.
+     */
+    private function copiarConfiguracionDesde(string $origenSlug, string $destinoSlug): void
+    {
+        $pdo = AppConnection::get();
+        $t = AppConnection::table('app_config');
+        $driver = AppConnection::getCurrentDriver();
+
+        $sel = $pdo->prepare($driver === 'mysql'
+            ? "SELECT `key`, value, updated_at FROM {$t} WHERE workspace_slug = :orig"
+            : "SELECT key, value, updated_at FROM {$t} WHERE workspace_slug = :orig");
+        $sel->execute([':orig' => $origenSlug]);
+        $rows = $sel->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        if ($driver === 'mysql') {
+            $upsert = $pdo->prepare("
+                INSERT INTO {$t} (workspace_slug, `key`, value, updated_at) VALUES (:ws, :k, :v, :t)
+                ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)
+            ");
+        } else {
+            $upsert = $pdo->prepare("
+                INSERT INTO {$t} (workspace_slug, key, value, updated_at) VALUES (:ws, :k, :v, :t)
+                ON CONFLICT(workspace_slug, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            ");
+        }
+
+        foreach ($rows as $r) {
+            $key = isset($r['key']) ? (string)$r['key'] : '';
+            $kCanonical = ConfigService::normalizarKey($key);
+            if ($kCanonical === '') continue;
+            $upsert->execute([
+                ':ws' => $destinoSlug,
+                ':k' => $kCanonical,
+                ':v' => (string)($r['value'] ?? ''),
+                ':t' => (string)($r['updated_at'] ?? date('Y-m-d H:i:s')),
+            ]);
+        }
+        ConfigService::dedupeAppConfigForWorkspace($destinoSlug);
     }
 
     public function set()
@@ -81,6 +141,86 @@ class WorkspaceController extends BaseController
         $this->jsonResponse(['success' => true, 'workspace' => $slug]);
     }
 
+    /**
+     * Vista de parametrización global: motor (SQLite/MySQL) y, si MySQL, host, puerto, usuario, contraseña, base de datos.
+     */
+    public function globalConfig()
+    {
+        $config = MysqlAppConfig::get();
+        $storageEngine = \App\Services\StorageEngineConfig::getStorageEngine();
+        $this->render('workspace_global_config', [
+            'mysql' => $config,
+            'storage_engine' => $storageEngine,
+        ]);
+    }
+
+    /**
+     * Guardar parametrización global (API).
+     * Acepta driver: 'sqlite' | 'mysql'. Si es mysql, valida conexión y guarda host, puerto, usuario, contraseña, base de datos.
+     */
+    public function globalConfigSave()
+    {
+        $p = $this->payload();
+        $driver = isset($p['driver']) ? strtolower(trim((string) $p['driver'])) : '';
+
+        if ($driver === 'sqlite') {
+            \App\Services\StorageEngineConfig::setStorageEngine('sqlite');
+            $this->jsonResponse(['success' => true]);
+            return;
+        }
+
+        // driver === 'mysql' o no enviado: validar y guardar MySQL
+
+        $host = isset($p['host']) ? trim((string) $p['host']) : '';
+        $port = isset($p['port']) ? (int) $p['port'] : 3306;
+        $user = isset($p['user']) ? trim((string) $p['user']) : '';
+        $password = isset($p['password']) ? (string) $p['password'] : '';
+        $database = isset($p['database']) ? trim((string) $p['database']) : '';
+
+        if ($host === '') {
+            $this->jsonResponse(['success' => false, 'error' => 'Host es obligatorio'], 400);
+        }
+        if ($port < 1 || $port > 65535) {
+            $this->jsonResponse(['success' => false, 'error' => 'Puerto inválido'], 400);
+        }
+        if ($database === '') {
+            $this->jsonResponse(['success' => false, 'error' => 'Base de datos es obligatoria'], 400);
+        }
+
+        if ($password === '') {
+            $current = MysqlAppConfig::get();
+            $password = (string) ($current['password'] ?? '');
+        }
+
+        try {
+            $dsn = "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4";
+            $pdo = new PDO($dsn, $user, $password, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_TIMEOUT => 5,
+            ]);
+            $pdo->query('SELECT 1');
+        } catch (\Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'error' => 'Error de conexión: ' . $e->getMessage(),
+            ], 400);
+        }
+
+        $toSave = [
+            'host' => $host,
+            'port' => $port,
+            'user' => $user,
+            'database' => $database,
+            'connection_tested_ok' => true,
+        ];
+        if ((string) ($p['password'] ?? '') !== '') {
+            $toSave['password'] = (string) $p['password'];
+        }
+        MysqlAppConfig::save($toSave);
+        \App\Services\StorageEngineConfig::setStorageEngine('mysql');
+        $this->jsonResponse(['success' => true]);
+    }
+
     private function payload(): array
     {
         $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
@@ -98,17 +238,23 @@ class WorkspaceController extends BaseController
         $slug = WorkspaceService::slugify($slug);
         $paths = WorkspaceService::paths($slug);
         $root = WorkspaceService::root($slug);
-
-        $dbPath = $paths['dbPath'] ?? '';
         $imagesDir = $paths['imagesDir'] ?? '';
+
+        $pdo = AppConnection::get();
+        $tAppConfig = AppConnection::table('app_config');
+        $tImages = AppConnection::table('images');
+        $tDetections = AppConnection::table('detections');
+
+        $driver = AppConnection::getCurrentDriver();
+        $storageLabel = $driver === 'mysql' ? 'MariaDB/MySQL' : 'SQLite';
 
         $out = [
             'slug' => $slug,
             'is_current' => ($current !== null && $slug === $current),
             'root' => $root,
             'images_dir' => $imagesDir,
-            'db_path' => $dbPath,
-            'db_exists' => ($dbPath && is_file($dbPath)),
+            'db_path' => $storageLabel,
+            'db_exists' => true,
             'created_at' => is_dir($root) ? @filectime($root) : null,
             'updated_at' => null,
             'mode' => null,
@@ -116,28 +262,16 @@ class WorkspaceController extends BaseController
             'images_total' => null,
             'images_pending' => null,
             'detections_total' => null,
+            'registros_pendientes_descarga' => null,
         ];
 
-        if (!$out['db_exists']) {
-            return $out;
-        }
-
         try {
-            $pdo = new PDO('sqlite:' . $dbPath);
-            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-
-            $has = function (string $table) use ($pdo): bool {
-                $st = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:t LIMIT 1");
-                $st->execute([':t' => $table]);
-                return (bool)$st->fetchColumn();
-            };
-
-            if ($has('app_config')) {
+            $st = $pdo->prepare("SELECT `key`, value, updated_at FROM {$tAppConfig} WHERE workspace_slug = :ws");
+            $st->execute([':ws' => $slug]);
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            if (!empty($rows)) {
                 $cfg = [];
-                $st = $pdo->query("SELECT key, value, updated_at FROM app_config");
-                foreach (($st ? ($st->fetchAll() ?: []) : []) as $r) {
+                foreach ($rows as $r) {
                     $k = isset($r['key']) ? (string)$r['key'] : '';
                     if ($k === '') continue;
                     $cfg[$k] = [
@@ -153,7 +287,6 @@ class WorkspaceController extends BaseController
                 $clas = trim((string)($cfg['CLASIFICADOR_BASE_URL']['value'] ?? ''));
                 $out['configured'] = ($out['mode'] !== null) && ($clas !== '');
 
-                // updated_at: última actualización de app_config
                 $latest = null;
                 foreach ($cfg as $row) {
                     $u = trim((string)($row['updated_at'] ?? ''));
@@ -163,46 +296,36 @@ class WorkspaceController extends BaseController
                 $out['updated_at'] = $latest;
             }
 
-            if ($has('images')) {
-                $out['images_total'] = (int)$pdo->query("SELECT COUNT(*) FROM images")->fetchColumn();
-                $out['images_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM images WHERE detect_estado IS NULL OR detect_estado='na' OR detect_estado='pending'")->fetchColumn();
-            }
-            if ($has('detections')) {
-                $out['detections_total'] = (int)$pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+            $st = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = :ws");
+            $st->execute([':ws' => $slug]);
+            $out['images_total'] = (int)$st->fetchColumn();
+
+            $st = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = :ws AND (detect_estado IS NULL OR detect_estado='na' OR detect_estado='pending')");
+            $st->execute([':ws' => $slug]);
+            $out['images_pending'] = (int)$st->fetchColumn();
+
+            $st = $pdo->prepare("SELECT COUNT(*) FROM {$tDetections} WHERE workspace_slug = :ws");
+            $st->execute([':ws' => $slug]);
+            $out['detections_total'] = (int)$st->fetchColumn();
+
+            if ($out['mode'] === 'db_and_images') {
+                $tTablesState = AppConnection::table('tables_state');
+                $st = $pdo->prepare("SELECT ultimo_id, max_id FROM {$tTablesState} WHERE workspace_slug = :ws");
+                $st->execute([':ws' => $slug]);
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                $sumPendientes = 0;
+                foreach ($rows as $r) {
+                    $maxId = (int)($r['max_id'] ?? 0);
+                    $ultimoId = (int)($r['ultimo_id'] ?? 0);
+                    $sumPendientes += max(0, $maxId - $ultimoId + 1);
+                }
+                $out['registros_pendientes_descarga'] = $sumPendientes;
             }
         } catch (\Throwable $e) {
             // Silencioso: la vista solo muestra metadata best-effort
         }
 
         return $out;
-    }
-
-    /**
-     * Abre PDO para un workspace por path. Devuelve null si no hay DB o falla.
-     */
-    private function pdoForSlug(string $slug): ?PDO
-    {
-        $paths = WorkspaceService::paths($slug);
-        $dbPath = $paths['dbPath'] ?? '';
-        if ($dbPath === '' || !is_file($dbPath)) {
-            return null;
-        }
-        try {
-            $pdo = new PDO('sqlite:' . $dbPath);
-            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-            return $pdo;
-        } catch (\Throwable $e) {
-            return null;
-        }
-    }
-
-    private function hasTable(PDO $pdo, string $table): bool
-    {
-        $st = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:t LIMIT 1");
-        $st->execute([':t' => $table]);
-        return (bool)$st->fetchColumn();
     }
 
     private function nombreDesdeRuta(string $ruta): string
@@ -224,23 +347,27 @@ class WorkspaceController extends BaseController
             $slugs = WorkspaceService::listWorkspaces();
             $carpetas = [];
             $searchKey = $q !== '' ? StringNormalizer::toSearchKey($q) : '';
+            $pdo = AppConnection::get();
+            $tFolders = AppConnection::table('folders');
+            $tImages = AppConnection::table('images');
+            $tDet = AppConnection::table('detections');
 
             foreach ($slugs as $slug) {
-                $pdo = $this->pdoForSlug((string)$slug);
-                if ($pdo === null || !$this->hasTable($pdo, 'folders')) {
-                    continue;
-                }
+                $slug = (string)$slug;
                 try {
                     if ($searchKey === '') {
-                        $rows = $pdo->query('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM folders ORDER BY total_imagenes DESC, ruta_carpeta ASC LIMIT ' . self::LIMIT_CARPETAS_POR_WS)->fetchAll();
+                        $stmt = $pdo->prepare('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM ' . $tFolders . ' WHERE workspace_slug = :ws ORDER BY total_imagenes DESC, ruta_carpeta ASC LIMIT ' . self::LIMIT_CARPETAS_POR_WS);
+                        $stmt->execute([':ws' => $slug]);
+                        $rows = $stmt->fetchAll();
                     } else {
                         $stmt = $pdo->prepare("
                             SELECT ruta_carpeta as ruta, nombre, total_imagenes
-                            FROM folders
-                            WHERE COALESCE(search_key, '') LIKE :q
+                            FROM {$tFolders}
+                            WHERE workspace_slug = :ws AND COALESCE(search_key, '') LIKE :q
                             ORDER BY total_imagenes DESC, ruta_carpeta ASC
                             LIMIT :lim
                         ");
+                        $stmt->bindValue(':ws', $slug, PDO::PARAM_STR);
                         $stmt->bindValue(':q', '%' . $searchKey . '%', PDO::PARAM_STR);
                         $stmt->bindValue(':lim', self::LIMIT_CARPETAS_POR_WS, PDO::PARAM_INT);
                         $stmt->execute();
@@ -250,37 +377,35 @@ class WorkspaceController extends BaseController
                     $rutas = array_values(array_unique(array_filter($rutas, fn($v) => $v !== '')));
                     $pendByRuta = [];
                     $tagsByRuta = [];
-                    if ($rows && !empty($rutas) && $this->hasTable($pdo, 'images')) {
+                    if ($rows && !empty($rutas)) {
                         $ph = implode(',', array_fill(0, count($rutas), '?'));
                         $stmtPend = $pdo->prepare("
                             SELECT i.ruta_carpeta as ruta, COUNT(*) as c
-                            FROM images i
-                            WHERE i.ruta_carpeta IN ($ph)
+                            FROM {$tImages} i
+                            WHERE i.workspace_slug = ? AND i.ruta_carpeta IN ($ph)
                               AND (COALESCE(i.detect_estado,'') <> 'ok' OR COALESCE(i.clasif_estado,'') = 'pending')
                             GROUP BY i.ruta_carpeta
                         ");
-                        $stmtPend->execute($rutas);
+                        $stmtPend->execute(array_merge([$slug], $rutas));
                         foreach ($stmtPend->fetchAll() ?: [] as $row) {
                             $rutaP = (string)($row['ruta'] ?? '');
                             if ($rutaP !== '') $pendByRuta[$rutaP] = (int)($row['c'] ?? 0);
                         }
-                        if ($this->hasTable($pdo, 'detections')) {
-                            $stmtTags = $pdo->prepare("
-                                SELECT i.ruta_carpeta as ruta, d.label as label, COUNT(DISTINCT i.ruta_relativa) as c
-                                FROM images i
-                                JOIN detections d ON d.image_ruta_relativa = i.ruta_relativa
-                                WHERE COALESCE(i.ruta_carpeta,'') IN ($ph)
-                                GROUP BY i.ruta_carpeta, d.label
-                            ");
-                            $stmtTags->execute($rutas);
-                            foreach ($stmtTags->fetchAll() ?: [] as $row) {
-                                $rutaP = (string)($row['ruta'] ?? '');
-                                $lab = isset($row['label']) ? strtoupper(trim((string)$row['label'])) : '';
-                                $cnt = (int)($row['c'] ?? 0);
-                                if ($rutaP !== '' && $lab !== '' && $cnt > 0) {
-                                    if (!isset($tagsByRuta[$rutaP])) $tagsByRuta[$rutaP] = [];
-                                    $tagsByRuta[$rutaP][$lab] = ($tagsByRuta[$rutaP][$lab] ?? 0) + $cnt;
-                                }
+                        $stmtTags = $pdo->prepare("
+                            SELECT i.ruta_carpeta as ruta, d.label as label, COUNT(DISTINCT i.ruta_relativa) as c
+                            FROM {$tImages} i
+                            JOIN {$tDet} d ON d.workspace_slug = i.workspace_slug AND d.image_ruta_relativa = i.ruta_relativa
+                            WHERE i.workspace_slug = ? AND COALESCE(i.ruta_carpeta,'') IN ($ph)
+                            GROUP BY i.ruta_carpeta, d.label
+                        ");
+                        $stmtTags->execute(array_merge([$slug], $rutas));
+                        foreach ($stmtTags->fetchAll() ?: [] as $row) {
+                            $rutaP = (string)($row['ruta'] ?? '');
+                            $lab = isset($row['label']) ? strtoupper(trim((string)$row['label'])) : '';
+                            $cnt = (int)($row['c'] ?? 0);
+                            if ($rutaP !== '' && $lab !== '' && $cnt > 0) {
+                                if (!isset($tagsByRuta[$rutaP])) $tagsByRuta[$rutaP] = [];
+                                $tagsByRuta[$rutaP][$lab] = ($tagsByRuta[$rutaP][$lab] ?? 0) + $cnt;
                             }
                         }
                     }
@@ -338,22 +463,24 @@ class WorkspaceController extends BaseController
         try {
             $slugs = WorkspaceService::listWorkspaces();
             $byLabel = [];
+            $pdo = AppConnection::get();
+            $tDet = AppConnection::table('detections');
 
             foreach ($slugs as $slug) {
-                $pdo = $this->pdoForSlug((string)$slug);
-                if ($pdo === null || !$this->hasTable($pdo, 'detections')) {
-                    continue;
-                }
+                $slug = (string)$slug;
                 try {
-                    $rows = $pdo->query("
+                    $stmt = $pdo->prepare("
                         SELECT label,
                                COUNT(DISTINCT image_ruta_relativa) as c,
                                MIN(score) as min_score,
                                MAX(score) as max_score
-                        FROM detections
+                        FROM {$tDet}
+                        WHERE workspace_slug = :ws
                         GROUP BY label
                         ORDER BY c DESC, label ASC
-                    ")->fetchAll();
+                    ");
+                    $stmt->execute([':ws' => $slug]);
+                    $rows = $stmt->fetchAll();
                     foreach ($rows as $r) {
                         $label = (string)($r['label'] ?? '');
                         if ($label === '') continue;
@@ -430,25 +557,25 @@ class WorkspaceController extends BaseController
             $allImagenes = [];
             $placeholders = implode(',', array_fill(0, count($labelsNorm), '?'));
             $labelCondition = "UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)";
+            $pdo = AppConnection::get();
+            $tImg = AppConnection::table('images');
+            $tDet = AppConnection::table('detections');
 
             foreach ($slugs as $slug) {
                 if (count($allImagenes) >= self::LIMIT_IMAGENES_GLOBAL) {
                     break;
                 }
-                $pdo = $this->pdoForSlug((string)$slug);
-                if ($pdo === null || !$this->hasTable($pdo, 'detections') || !$this->hasTable($pdo, 'images')) {
-                    continue;
-                }
+                $slug = (string)$slug;
                 try {
                     $stmtTop = $pdo->prepare("
                         SELECT d.image_ruta_relativa, MAX(d.score) as best_score
-                        FROM detections d
-                        WHERE $labelCondition AND d.score >= ?
+                        FROM {$tDet} d
+                        WHERE d.workspace_slug = :ws AND $labelCondition AND d.score >= ?
                         GROUP BY d.image_ruta_relativa
                         ORDER BY best_score DESC
                         LIMIT " . self::LIMIT_IMAGENES_POR_WS . "
                     ");
-                    $stmtTop->execute(array_merge($labelsNorm, [$umbralFloat]));
+                    $stmtTop->execute(array_merge([$slug], $labelsNorm, [$umbralFloat]));
                     $top = $stmtTop->fetchAll();
                     if (empty($top)) continue;
 
@@ -457,8 +584,8 @@ class WorkspaceController extends BaseController
                     foreach ($top as $r) $bestByKey[(string)$r['image_ruta_relativa']] = (float)$r['best_score'];
 
                     $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
-                    $stmtExists = $pdo->prepare("SELECT ruta_relativa FROM images WHERE ruta_relativa IN ($ph2)");
-                    $stmtExists->execute($imageKeys);
+                    $stmtExists = $pdo->prepare("SELECT ruta_relativa FROM {$tImg} WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
+                    $stmtExists->execute(array_merge([$slug], $imageKeys));
                     $existingKeys = [];
                     while ($row = $stmtExists->fetch(PDO::FETCH_NUM)) {
                         $existingKeys[(string)$row[0]] = true;
@@ -466,21 +593,21 @@ class WorkspaceController extends BaseController
                     $imageKeys = array_values(array_filter($imageKeys, fn($k) => !empty($existingKeys[$k])));
                     if (empty($imageKeys)) continue;
 
-                    $stmtInfo = $pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM images WHERE ruta_relativa IN ($ph2)");
-                    $stmtInfo->execute($imageKeys);
+                    $stmtInfo = $pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM {$tImg} WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
+                    $stmtInfo->execute(array_merge([$slug], $imageKeys));
                     $infoRows = $stmtInfo->fetchAll();
                     $infoByKey = [];
                     foreach ($infoRows as $r) $infoByKey[(string)$r['ruta_relativa']] = $r;
 
                     $stmtMatches = $pdo->prepare("
                         SELECT d.image_ruta_relativa, d.label, MAX(d.score) as score
-                        FROM detections d
-                        WHERE d.image_ruta_relativa IN ($ph2)
+                        FROM {$tDet} d
+                        WHERE d.workspace_slug = ? AND d.image_ruta_relativa IN ($ph2)
                           AND UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)
                           AND d.score >= ?
                         GROUP BY d.image_ruta_relativa, d.label
                     ");
-                    $stmtMatches->execute(array_merge($imageKeys, $labelsNorm, [$umbralFloat]));
+                    $stmtMatches->execute(array_merge([$slug], $imageKeys, $labelsNorm, [$umbralFloat]));
                     $matchRows = $stmtMatches->fetchAll();
                     $matchesByKey = [];
                     foreach ($matchRows as $r) {

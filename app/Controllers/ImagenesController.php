@@ -5,8 +5,8 @@ namespace App\Controllers;
 use App\Models\ImagenesIndex;
 use App\Models\CarpetasIndex;
 use App\Services\LogService;
-use App\Services\SqliteConnection;
-use App\Services\SqliteSchema;
+use App\Services\AppConnection;
+use App\Services\AppSchema;
 
 class ImagenesController extends BaseController
 {
@@ -120,8 +120,9 @@ class ImagenesController extends BaseController
             $stats = $imagenesIndex->getStats(true);
             $statsDet = $imagenesIndex->getStatsDeteccion(true);
             $stats['pendientes_deteccion'] = (int)($statsDet['pendientes'] ?? 0);
-            $pdo = \App\Services\SqliteConnection::get();
-            $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+            $pdo = AppConnection::get();
+            $tDet = AppConnection::table('detections');
+            $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
             $stats['detections_total'] = ($detCount !== false) ? (int)$detCount : 0;
 
             $this->jsonResponse([
@@ -152,8 +153,9 @@ class ImagenesController extends BaseController
             if ($siguiente === null) {
                 $stats = $imagenesIndex->getStats(true);
                 $statsDet = $imagenesIndex->getStatsDeteccion(true);
-                $pdo = \App\Services\SqliteConnection::get();
-                $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+                $pdo = AppConnection::get();
+                $tDet = AppConnection::table('detections');
+                $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
                 $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
                 $this->jsonResponse([
                     'success' => true,
@@ -177,8 +179,9 @@ class ImagenesController extends BaseController
                 $statsDet = $imagenesIndex->getStatsDeteccion(true);
                 $pendientesClas = (int)($stats['pendientes'] ?? 0);
                 $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
-                $pdo = \App\Services\SqliteConnection::get();
-                $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+                $pdo = AppConnection::get();
+                $tDet = AppConnection::table('detections');
+                $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
                 $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
                 $this->jsonResponse([
                     'success' => true,
@@ -300,14 +303,22 @@ class ImagenesController extends BaseController
                 $detectOk = false;
                 $detectError = 'Error al llamar /detect: ' . ($curlErr2 ?: 'desconocido');
                 $imagenesIndex->marcarDeteccionError($key, $detectError);
+                $this->jsonResponse($this->buildProcesarResponseStoppedByClassifierError(
+                    $key, $record, $detectError, $imagenesIndex
+                ));
+                return;
+            }
+            $json2 = json_decode($body2 ?: '', true);
+            $rawDet = $extractDetections($json2);
+            if ($rawDet === null) {
+                $detectOk = false;
+                $detectError = 'Respuesta inválida de /detect';
+                $imagenesIndex->marcarDeteccionError($key, $detectError . ' (http ' . $httpCode2 . ')');
+                $this->jsonResponse($this->buildProcesarResponseStoppedByClassifierError(
+                    $key, $record, $detectError, $imagenesIndex
+                ));
+                return;
             } else {
-                $json2 = json_decode($body2 ?: '', true);
-                $rawDet = $extractDetections($json2);
-                if ($rawDet === null) {
-                    $detectOk = false;
-                    $detectError = 'Respuesta inválida de /detect';
-                    $imagenesIndex->marcarDeteccionError($key, $detectError . ' (http ' . $httpCode2 . ')');
-                } else {
                     $norm = [];
                     foreach ($rawDet as $d) {
                         $n = $normalizeDetection($d);
@@ -343,7 +354,6 @@ class ImagenesController extends BaseController
 
                     $detectOk = true;
                     $imagenesIndex->marcarDeteccion($key, $detecciones, $resultado, $unsafeScore);
-                }
             }
 
             $stats = $imagenesIndex->getStats(true);
@@ -351,8 +361,9 @@ class ImagenesController extends BaseController
             $pendientesClas = (int)($stats['pendientes'] ?? 0);
             $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
             $pendientesTotal = $pendientesClas + $pendientesDet;
-            $pdo = \App\Services\SqliteConnection::get();
-            $detCount = $pdo->query("SELECT COUNT(*) FROM detections")->fetchColumn();
+            $pdo = AppConnection::get();
+            $tDet = AppConnection::table('detections');
+            $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
             $detectionsTotal = ($detCount !== false) ? (int)$detCount : 0;
 
             $rutaRel = $record['ruta_relativa'] ?? $key;
@@ -407,6 +418,35 @@ class ImagenesController extends BaseController
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Respuesta cuando el clasificador (timeout/error) obliga a parar: la imagen queda en error y el cliente debe dejar de procesar.
+     */
+    private function buildProcesarResponseStoppedByClassifierError(string $key, array $record, string $detectError, ImagenesIndex $imagenesIndex): array
+    {
+        $stats = $imagenesIndex->getStats(true);
+        $statsDet = $imagenesIndex->getStatsDeteccion(true);
+        $pendientesClas = (int)($stats['pendientes'] ?? 0);
+        $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
+        $pdo = AppConnection::get();
+        $tDet = AppConnection::table('detections');
+        $detCount = $pdo->query("SELECT COUNT(*) FROM {$tDet}")->fetchColumn();
+        return [
+            'success' => true,
+            'procesada' => false,
+            'stopped_due_to_classifier_error' => true,
+            'error' => $detectError,
+            'ruta_relativa' => $record['ruta_relativa'] ?? $key,
+            'ruta_carpeta' => $record['ruta_carpeta'] ?? '',
+            'pendientes' => $pendientesClas,
+            'pendientes_clasificacion' => $pendientesClas,
+            'pendientes_deteccion' => $pendientesDet,
+            'pendientes_total' => $pendientesClas + $pendientesDet,
+            'detections_total' => ($detCount !== false) ? (int)$detCount : 0,
+            'stats' => $stats,
+            'stats_deteccion' => $statsDet,
+        ];
     }
 
     public function etiquetasDetectadas()
@@ -492,20 +532,25 @@ class ImagenesController extends BaseController
                 $baseNorm = str_replace('\\', '/', rtrim($baseReal, "/\\"));
                 $baseNormLower = strtolower($baseNorm);
 
-                $pdo = SqliteConnection::get();
-                SqliteSchema::ensure($pdo);
+                $pdo = AppConnection::get();
+                AppSchema::ensure($pdo);
+                $tImg = AppConnection::table('images');
+                $wsDedupe = AppConnection::currentSlug() ?? 'default';
 
-                $rows = $pdo->query("
+                $stmtRows = $pdo->prepare("
                     SELECT ruta_relativa, ruta_completa, mtime
-                    FROM images
+                    FROM {$tImg}
+                    WHERE workspace_slug = :ws
                     ORDER BY COALESCE(mtime, 0) ASC, ruta_relativa ASC
-                ")->fetchAll();
+                ");
+                $stmtRows->execute([':ws' => $wsDedupe]);
+                $rows = $stmtRows->fetchAll();
 
                 $seen = [];
                 $pdo->beginTransaction();
                 try {
-                    $stmtSet = $pdo->prepare("UPDATE images SET content_md5 = :m WHERE ruta_relativa = :k");
-                    $stmtDel = $pdo->prepare("DELETE FROM images WHERE ruta_relativa = :k");
+                    $stmtSet = $pdo->prepare("UPDATE {$tImg} SET content_md5 = :m WHERE workspace_slug = :ws AND ruta_relativa = :k");
+                    $stmtDel = $pdo->prepare("DELETE FROM {$tImg} WHERE workspace_slug = :ws AND ruta_relativa = :k");
 
                     foreach ($rows as $r) {
                         $k = (string)($r['ruta_relativa'] ?? '');
@@ -521,7 +566,7 @@ class ImagenesController extends BaseController
                             // keep
                             $seen[$md5] = $k;
                             try {
-                                $stmtSet->execute([':m' => $md5, ':k' => $k]);
+                                $stmtSet->execute([':m' => $md5, ':ws' => $wsDedupe, ':k' => $k]);
                             } catch (\Throwable $e) {
                                 // Si falla por unique/lock, no bloquear dedupe
                             }
@@ -540,7 +585,7 @@ class ImagenesController extends BaseController
                             }
                         }
 
-                        $stmtDel->execute([':k' => $k]);
+                        $stmtDel->execute([':ws' => $wsDedupe, ':k' => $k]);
                         $duplicatesRemoved['deleted_rows']++;
                     }
 
@@ -600,14 +645,18 @@ class ImagenesController extends BaseController
             $t0 = microtime(true);
             $now = date('Y-m-d H:i:s');
 
-            $pdo = SqliteConnection::get();
-            SqliteSchema::ensure($pdo);
+            $pdo = AppConnection::get();
+            AppSchema::ensure($pdo);
+            $tDet = AppConnection::table('detections');
+            $tImg = AppConnection::table('images');
 
+            $ws = AppConnection::currentSlug() ?? 'default';
             $pdo->beginTransaction();
             try {
-                $pdo->exec('DELETE FROM detections');
+                $stmtDelDet = $pdo->prepare('DELETE FROM ' . $tDet . ' WHERE workspace_slug = :ws');
+                $stmtDelDet->execute([':ws' => $ws]);
                 $stmt = $pdo->prepare("
-                    UPDATE images
+                    UPDATE {$tImg}
                     SET
                       clasif_estado='pending',
                       safe=NULL,
@@ -620,8 +669,9 @@ class ImagenesController extends BaseController
                       detect_error=NULL,
                       detect_en=NULL,
                       actualizada_en=:t
+                    WHERE workspace_slug = :ws
                 ");
-                $stmt->execute([':t' => $now]);
+                $stmt->execute([':t' => $now, ':ws' => $ws]);
                 $pdo->commit();
             } catch (\Throwable $e) {
                 $pdo->rollBack();
@@ -685,11 +735,14 @@ class ImagenesController extends BaseController
                 $rutaRelativa = ($ruta !== '') ? ($ruta . '/' . $archivo) : $archivo;
             }
 
-            $pdo = SqliteConnection::get();
-            SqliteSchema::ensure($pdo);
+            $pdo = AppConnection::get();
+            AppSchema::ensure($pdo);
+            $tImg = AppConnection::table('images');
+            $tDet = AppConnection::table('detections');
+            $ws = AppConnection::currentSlug() ?? 'default';
 
-            $stmtImg = $pdo->prepare("SELECT ruta_relativa, archivo, ruta_carpeta, clasif_estado, detect_estado FROM images WHERE ruta_relativa = :k LIMIT 1");
-            $stmtImg->execute([':k' => $rutaRelativa]);
+            $stmtImg = $pdo->prepare("SELECT ruta_relativa, archivo, ruta_carpeta, clasif_estado, detect_estado FROM {$tImg} WHERE workspace_slug = :ws AND ruta_relativa = :k LIMIT 1");
+            $stmtImg->execute([':ws' => $ws, ':k' => $rutaRelativa]);
             $img = $stmtImg->fetch();
             if (!$img) {
                 $this->jsonResponse([
@@ -707,11 +760,11 @@ class ImagenesController extends BaseController
 
             $stmtDet = $pdo->prepare("
                 SELECT label, score, x1, y1, x2, y2
-                FROM detections
-                WHERE image_ruta_relativa = :k
+                FROM {$tDet}
+                WHERE workspace_slug = :ws AND image_ruta_relativa = :k
                 ORDER BY score DESC, label ASC
             ");
-            $stmtDet->execute([':k' => $rutaRelativa]);
+            $stmtDet->execute([':ws' => $ws, ':k' => $rutaRelativa]);
             $rows = $stmtDet->fetchAll() ?: [];
             $out = [];
             foreach ($rows as $r) {

@@ -14,15 +14,26 @@ use App\Services\StringNormalizer;
 class ImagenesIndex
 {
     private $pdo;
+    private $tImages;
+    private $tFolders;
+    private $tDetections;
     private $extensiones = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'];
     private const MAX_RESULTADOS_BUSQUEDA_ETIQUETAS = 500;
     private const MD5_HEX_LEN = 32;
 
+    private function ws(): string
+    {
+        return \App\Services\AppConnection::currentSlug() ?? 'default';
+    }
+
     public function __construct()
     {
         \App\Services\ConfigService::cargarYValidar();
-        $this->pdo = \App\Services\SqliteConnection::get();
-        \App\Services\SqliteSchema::ensure($this->pdo);
+        $this->pdo = \App\Services\AppConnection::get();
+        \App\Services\AppSchema::ensure($this->pdo);
+        $this->tImages = \App\Services\AppConnection::table('images');
+        $this->tFolders = \App\Services\AppConnection::table('folders');
+        $this->tDetections = \App\Services\AppConnection::table('detections');
     }
 
     public static function resolverDirectorioBaseImagenes(): string
@@ -89,6 +100,78 @@ class ImagenesIndex
         ];
     }
 
+    private function buildImagesUpsertStmt(): \PDOStatement
+    {
+        $driver = \App\Services\AppConnection::getCurrentDriver();
+        if ($driver === 'mysql') {
+            return $this->pdo->prepare("
+                INSERT INTO " . $this->tImages . " (
+                  workspace_slug, ruta_relativa, ruta_completa, ruta_carpeta, archivo,
+                  indexada, indexada_en, actualizada_en, mtime, tamano, seen_run,
+                  clasif_estado, detect_requerida, detect_estado
+                ) VALUES (
+                  :ws, :k, :full, :folder, :file,
+                  1, :now, :now2, :mtime, :size, 1,
+                  'pending', 1, 'pending'
+                )
+                ON DUPLICATE KEY UPDATE
+                  ruta_completa = VALUES(ruta_completa),
+                  ruta_carpeta = VALUES(ruta_carpeta),
+                  archivo = VALUES(archivo),
+                  indexada = 1,
+                  actualizada_en = VALUES(actualizada_en),
+                  mtime = VALUES(mtime),
+                  tamano = VALUES(tamano),
+                  seen_run = 1
+            ");
+        }
+        return $this->pdo->prepare("
+            INSERT INTO " . $this->tImages . "(
+              workspace_slug, ruta_relativa, ruta_completa, ruta_carpeta, archivo,
+              indexada, indexada_en, actualizada_en, mtime, tamano, seen_run,
+              clasif_estado, detect_requerida, detect_estado
+            ) VALUES(
+              :ws, :k, :full, :folder, :file,
+              1, :now, :now2, :mtime, :size, 1,
+              'pending', 1, 'pending'
+            )
+            ON CONFLICT(workspace_slug, ruta_relativa) DO UPDATE SET
+              ruta_completa=excluded.ruta_completa,
+              ruta_carpeta=excluded.ruta_carpeta,
+              archivo=excluded.archivo,
+              indexada=1,
+              actualizada_en=excluded.actualizada_en,
+              mtime=excluded.mtime,
+              tamano=excluded.tamano,
+              seen_run=1
+        ");
+    }
+
+    private function buildFoldersUpsertStmt(): \PDOStatement
+    {
+        $driver = \App\Services\AppConnection::getCurrentDriver();
+        if ($driver === 'mysql') {
+            return $this->pdo->prepare("
+                INSERT INTO " . $this->tFolders . "(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+                VALUES(:ws, :ruta, :nombre, :search_key, (SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws2 AND ruta_carpeta = :ruta2), :now)
+                ON DUPLICATE KEY UPDATE
+                  nombre = VALUES(nombre),
+                  search_key = VALUES(search_key),
+                  total_imagenes = (SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws3 AND ruta_carpeta = VALUES(ruta_carpeta)),
+                  actualizada_en = VALUES(actualizada_en)
+            ");
+        }
+        return $this->pdo->prepare("
+            INSERT INTO " . $this->tFolders . "(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+            VALUES(:ws, :ruta, :nombre, :search_key, (SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws2 AND ruta_carpeta = :ruta2), :now)
+            ON CONFLICT(workspace_slug, ruta_carpeta) DO UPDATE SET
+              nombre = excluded.nombre,
+              search_key = excluded.search_key,
+              total_imagenes = (SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = excluded.workspace_slug AND ruta_carpeta = excluded.ruta_carpeta),
+              actualizada_en = excluded.actualizada_en
+        ");
+    }
+
     private static function md5FileSafe(string $path): ?string
     {
         if ($path === '' || !is_file($path)) return null;
@@ -99,7 +182,9 @@ class ImagenesIndex
 
     public function getImagenes(): array
     {
-        $rows = $this->pdo->query('SELECT ruta_relativa, ruta_completa, ruta_carpeta, archivo, indexada, clasif_estado, safe, unsafe, resultado FROM images')->fetchAll();
+        $stmt = $this->pdo->prepare('SELECT ruta_relativa, ruta_completa, ruta_carpeta, archivo, indexada, clasif_estado, safe, unsafe, resultado FROM ' . $this->tImages . ' WHERE workspace_slug = :ws');
+        $stmt->execute([':ws' => $this->ws()]);
+        $rows = $stmt->fetchAll();
         $out = [];
         foreach ($rows as $r) {
             $key = (string)$r['ruta_relativa'];
@@ -120,18 +205,27 @@ class ImagenesIndex
 
     public function getImagen(string $key): ?array
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM images WHERE ruta_relativa = :k');
-        $stmt->execute([':k' => $key]);
+        $stmt = $this->pdo->prepare('SELECT * FROM ' . $this->tImages . ' WHERE workspace_slug = :ws AND ruta_relativa = :k');
+        $stmt->execute([':ws' => $this->ws(), ':k' => $key]);
         $row = $stmt->fetch();
         return $row ? $this->rowToRecord($row) : null;
     }
 
     public function getStats(bool $recalcularSiInconsistente = true): array
     {
-        $total = (int)$this->pdo->query("SELECT COUNT(*) FROM images")->fetchColumn();
-        $procesadas = (int)$this->pdo->query("SELECT COUNT(*) FROM images WHERE clasif_estado <> 'pending'")->fetchColumn();
-        $safe = (int)$this->pdo->query("SELECT COUNT(*) FROM images WHERE resultado = 'safe'")->fetchColumn();
-        $unsafe = (int)$this->pdo->query("SELECT COUNT(*) FROM images WHERE resultado = 'unsafe'")->fetchColumn();
+        $ws = $this->ws();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws");
+        $stmt->execute([':ws' => $ws]);
+        $total = (int)$stmt->fetchColumn();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND clasif_estado <> 'pending'");
+        $stmt->execute([':ws' => $ws]);
+        $procesadas = (int)$stmt->fetchColumn();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND resultado = 'safe'");
+        $stmt->execute([':ws' => $ws]);
+        $safe = (int)$stmt->fetchColumn();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND resultado = 'unsafe'");
+        $stmt->execute([':ws' => $ws]);
+        $unsafe = (int)$stmt->fetchColumn();
         return [
             'total' => $total,
             'procesadas' => $procesadas,
@@ -144,20 +238,30 @@ class ImagenesIndex
 
     public function getStatsDeteccion(bool $recalcularSiInconsistente = true): array
     {
-        $requeridas = (int)$this->pdo->query("SELECT COUNT(*) FROM images WHERE detect_requerida = 1")->fetchColumn();
-        $procesadas = (int)$this->pdo->query("SELECT COUNT(*) FROM images WHERE detect_requerida = 1 AND detect_estado = 'ok'")->fetchColumn();
-        $pendientes = (int)$this->pdo->query("
+        $ws = $this->ws();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND detect_requerida = 1");
+        $stmt->execute([':ws' => $ws]);
+        $requeridas = (int)$stmt->fetchColumn();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws AND detect_requerida = 1 AND detect_estado = 'ok'");
+        $stmt->execute([':ws' => $ws]);
+        $procesadas = (int)$stmt->fetchColumn();
+        $stmt = $this->pdo->prepare("
             SELECT COUNT(*)
-            FROM images
-            WHERE detect_requerida = 1
-              AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL)
-        ")->fetchColumn();
+            FROM " . $this->tImages . "
+            WHERE workspace_slug = :ws AND detect_requerida = 1
+              AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error')
+        ");
+        $stmt->execute([':ws' => $ws]);
+        $pendientes = (int)$stmt->fetchColumn();
 
-        $rows = $this->pdo->query("
+        $stmt = $this->pdo->prepare("
             SELECT label, COUNT(DISTINCT image_ruta_relativa) as c
-            FROM detections
+            FROM " . $this->tDetections . "
+            WHERE workspace_slug = :ws
             GROUP BY label
-        ")->fetchAll();
+        ");
+        $stmt->execute([':ws' => $ws]);
+        $rows = $stmt->fetchAll();
         $map = [];
         foreach ($rows as $r) {
             $map[(string)$r['label']] = (int)$r['c'];
@@ -177,41 +281,28 @@ class ImagenesIndex
      */
     public function sincronizarDesdeDirectorio(string $directorioBase): array
     {
+        $ws = $this->ws();
         $directorioBaseReal = rtrim($directorioBase, "/\\");
         if (!is_dir($directorioBaseReal)) {
-            $antes = (int)$this->pdo->query("SELECT COUNT(*) FROM images")->fetchColumn();
-            $this->pdo->exec("DELETE FROM images");
-            $this->pdo->exec("DELETE FROM folders");
+            $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws");
+            $stmt->execute([':ws' => $ws]);
+            $antes = (int)$stmt->fetchColumn();
+            $del1 = $this->pdo->prepare("DELETE FROM " . $this->tImages . " WHERE workspace_slug = :ws");
+            $del1->execute([':ws' => $ws]);
+            $del2 = $this->pdo->prepare("DELETE FROM " . $this->tFolders . " WHERE workspace_slug = :ws");
+            $del2->execute([':ws' => $ws]);
             return ['total_encontradas' => 0, 'nuevas' => 0, 'existentes' => 0, 'eliminadas' => $antes];
         }
 
-        $this->pdo->exec("UPDATE images SET seen_run = 0");
+        $upd = $this->pdo->prepare("UPDATE " . $this->tImages . " SET seen_run = 0 WHERE workspace_slug = :ws");
+        $upd->execute([':ws' => $ws]);
         $ahora = date('Y-m-d H:i:s');
         $nuevas = 0;
         $existentes = 0;
 
-        $stmtCheck = $this->pdo->prepare("SELECT 1 FROM images WHERE ruta_relativa = :k LIMIT 1");
-        $stmtUpsert = $this->pdo->prepare("
-            INSERT INTO images(
-              ruta_relativa, ruta_completa, ruta_carpeta, archivo,
-              indexada, indexada_en, actualizada_en, mtime, tamano, seen_run,
-              clasif_estado, detect_requerida, detect_estado
-            ) VALUES(
-              :k, :full, :folder, :file,
-              1, :now, :now2, :mtime, :size, 1,
-              'pending', 1, 'pending'
-            )
-            ON CONFLICT(ruta_relativa) DO UPDATE SET
-              ruta_completa=excluded.ruta_completa,
-              ruta_carpeta=excluded.ruta_carpeta,
-              archivo=excluded.archivo,
-              indexada=1,
-              actualizada_en=excluded.actualizada_en,
-              mtime=excluded.mtime,
-              tamano=excluded.tamano,
-              seen_run=1
-        ");
-        $stmtSetMd5 = $this->pdo->prepare("UPDATE images SET content_md5 = :m WHERE ruta_relativa = :k");
+        $stmtCheck = $this->pdo->prepare("SELECT 1 FROM " . $this->tImages . " WHERE workspace_slug = :ws AND ruta_relativa = :k LIMIT 1");
+        $stmtUpsert = $this->buildImagesUpsertStmt();
+        $stmtSetMd5 = $this->pdo->prepare("UPDATE " . $this->tImages . " SET content_md5 = :m WHERE workspace_slug = :ws AND ruta_relativa = :k");
 
         $iter = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator(
@@ -300,11 +391,12 @@ class ImagenesIndex
             $carpeta = self::normalizarCarpeta($rutaRel);
             $archivo = basename($rutaRel);
 
-            $stmtCheck->execute([':k' => $rutaRel]);
+            $stmtCheck->execute([':ws' => $ws, ':k' => $rutaRel]);
             $exists = ($stmtCheck->fetchColumn() !== false);
             if ($exists) $existentes++; else $nuevas++;
 
             $stmtUpsert->execute([
+                ':ws' => $ws,
                 ':k' => $rutaRel,
                 ':full' => $rutaCompleta,
                 ':folder' => $carpeta,
@@ -319,7 +411,7 @@ class ImagenesIndex
             $md5 = self::md5FileSafe($rutaCompleta);
             if ($md5) {
                 try {
-                    $stmtSetMd5->execute([':m' => $md5, ':k' => $rutaRel]);
+                    $stmtSetMd5->execute([':m' => $md5, ':ws' => $ws, ':k' => $rutaRel]);
                 } catch (\Throwable $e) {
                     // Duplicado por md5 o fallo puntual: dejar content_md5 NULL
                 }
@@ -333,12 +425,14 @@ class ImagenesIndex
         }
         $this->pdo->commit();
 
-        $del = $this->pdo->prepare("DELETE FROM images WHERE seen_run = 0");
-        $del->execute();
+        $del = $this->pdo->prepare("DELETE FROM " . $this->tImages . " WHERE workspace_slug = :ws AND seen_run = 0");
+        $del->execute([':ws' => $ws]);
         $eliminadas = $del->rowCount();
 
         (new CarpetasIndex())->regenerarDesdeImagenes($this);
-        $total = (int)$this->pdo->query("SELECT COUNT(*) FROM images")->fetchColumn();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM " . $this->tImages . " WHERE workspace_slug = :ws");
+        $stmt->execute([':ws' => $ws]);
+        $total = (int)$stmt->fetchColumn();
 
         return [
             'total_encontradas' => $total,
@@ -353,6 +447,7 @@ class ImagenesIndex
      */
     public function upsertDesdeRutas(array $rutasCompletas, ?string $directorioBase = null): array
     {
+        $ws = $this->ws();
         $directorioBaseReal = rtrim(($directorioBase ?? self::resolverDirectorioBaseImagenes()), "/\\");
         $baseRealpath = realpath($directorioBaseReal) ?: $directorioBaseReal;
         $baseNorm = str_replace('\\', '/', rtrim($baseRealpath, "/\\"));
@@ -364,20 +459,9 @@ class ImagenesIndex
         $ignoradas = 0;
         $foldersTouched = [];
 
-        $stmtCheck = $this->pdo->prepare("SELECT 1 FROM images WHERE ruta_relativa = :k LIMIT 1");
-        $stmtUpsert = $this->pdo->prepare("
-            INSERT INTO images(ruta_relativa, ruta_completa, ruta_carpeta, archivo, indexada, indexada_en, actualizada_en, mtime, tamano, clasif_estado, detect_requerida, detect_estado)
-            VALUES(:k, :full, :folder, :file, 1, :now, :now2, :mtime, :size, 'pending', 1, 'pending')
-            ON CONFLICT(ruta_relativa) DO UPDATE SET
-              ruta_completa=excluded.ruta_completa,
-              ruta_carpeta=excluded.ruta_carpeta,
-              archivo=excluded.archivo,
-              indexada=1,
-              actualizada_en=excluded.actualizada_en,
-              mtime=excluded.mtime,
-              tamano=excluded.tamano
-        ");
-        $stmtSetMd5 = $this->pdo->prepare("UPDATE images SET content_md5 = :m WHERE ruta_relativa = :k");
+        $stmtCheck = $this->pdo->prepare("SELECT 1 FROM " . $this->tImages . " WHERE workspace_slug = :ws AND ruta_relativa = :k LIMIT 1");
+        $stmtUpsert = $this->buildImagesUpsertStmt();
+        $stmtSetMd5 = $this->pdo->prepare("UPDATE " . $this->tImages . " SET content_md5 = :m WHERE workspace_slug = :ws AND ruta_relativa = :k");
 
         $this->pdo->beginTransaction();
         try {
@@ -410,11 +494,12 @@ class ImagenesIndex
                 $rutaRelativa = self::normalizarRelativa($rutaRelativa);
                 $carpeta = self::normalizarCarpeta($rutaRelativa);
 
-                $stmtCheck->execute([':k' => $rutaRelativa]);
+                $stmtCheck->execute([':ws' => $ws, ':k' => $rutaRelativa]);
                 $exists = ($stmtCheck->fetchColumn() !== false);
                 if ($exists) $existentes++; else $nuevas++;
 
                 $stmtUpsert->execute([
+                    ':ws' => $ws,
                     ':k' => $rutaRelativa,
                     ':full' => $rutaRealpath,
                     ':folder' => $carpeta,
@@ -429,7 +514,7 @@ class ImagenesIndex
                 $md5 = self::md5FileSafe($rutaRealpath);
                 if ($md5) {
                     try {
-                        $stmtSetMd5->execute([':m' => $md5, ':k' => $rutaRelativa]);
+                        $stmtSetMd5->execute([':m' => $md5, ':ws' => $ws, ':k' => $rutaRelativa]);
                     } catch (\Throwable $e) {
                         // Duplicado por md5 o fallo puntual: dejar content_md5 NULL
                     }
@@ -443,25 +528,26 @@ class ImagenesIndex
             throw $e;
         }
 
-        $stmtFolder = $this->pdo->prepare("
-            INSERT INTO folders(ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
-            VALUES(:ruta, :nombre, :search_key, (SELECT COUNT(*) FROM images WHERE ruta_carpeta = :ruta2), :now)
-            ON CONFLICT(ruta_carpeta) DO UPDATE SET
-              nombre = excluded.nombre,
-              search_key = excluded.search_key,
-              total_imagenes = (SELECT COUNT(*) FROM images WHERE ruta_carpeta = excluded.ruta_carpeta),
-              actualizada_en = excluded.actualizada_en
-        ");
+        $stmtFolder = $this->buildFoldersUpsertStmt();
+        $driver = \App\Services\AppConnection::getCurrentDriver();
         foreach (array_keys($foldersTouched) as $rutaCarpeta) {
             $nombre = ($rutaCarpeta === '') ? '' : basename($rutaCarpeta);
             $searchKey = StringNormalizer::toSearchKey($rutaCarpeta . ' ' . $nombre);
-            $stmtFolder->execute([
+            $params = [
+                ':ws' => $ws,
                 ':ruta' => $rutaCarpeta,
                 ':ruta2' => $rutaCarpeta,
                 ':nombre' => $nombre,
                 ':search_key' => $searchKey,
                 ':now' => $ahora
-            ]);
+            ];
+            if ($driver === 'mysql') {
+                $params[':ws2'] = $ws;
+                $params[':ws3'] = $ws;
+            } else {
+                $params[':ws2'] = $ws;
+            }
+            $stmtFolder->execute($params);
         }
 
         return ['nuevas' => $nuevas, 'existentes' => $existentes, 'ignoradas' => $ignoradas];
@@ -472,21 +558,25 @@ class ImagenesIndex
      */
     public function obtenerSiguientePendienteProcesar(): ?array
     {
-        // Nuevo flujo: solo /detect. Tomar primero las pendientes por detect.
-        $row = $this->pdo->query("
+        $ws = $this->ws();
+        $stmt = $this->pdo->prepare("
             SELECT *
-            FROM images
-            WHERE detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL
-            ORDER BY ruta_relativa ASC
+            FROM " . $this->tImages . "
+            WHERE workspace_slug = :ws
+              AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error')
+            ORDER BY CASE WHEN detect_estado = 'error' THEN 0 ELSE 1 END, ruta_relativa ASC
             LIMIT 1
-        ")->fetch();
+        ");
+        $stmt->execute([':ws' => $ws]);
+        $row = $stmt->fetch();
         if ($row) {
             $k = (string)$row['ruta_relativa'];
             return [$k, $this->rowToRecord($row), 'deteccion'];
         }
 
-        // Compat: imágenes antiguas que hayan quedado en pending antes del cambio.
-        $row = $this->pdo->query("SELECT * FROM images WHERE clasif_estado = 'pending' ORDER BY ruta_relativa ASC LIMIT 1")->fetch();
+        $stmt = $this->pdo->prepare("SELECT * FROM " . $this->tImages . " WHERE workspace_slug = :ws AND clasif_estado = 'pending' ORDER BY ruta_relativa ASC LIMIT 1");
+        $stmt->execute([':ws' => $ws]);
+        $row = $stmt->fetch();
         if ($row) {
             $k = (string)$row['ruta_relativa'];
             return [$k, $this->rowToRecord($row), 'deteccion'];
@@ -499,18 +589,18 @@ class ImagenesIndex
     {
         $now = date('Y-m-d H:i:s');
         $stmt = $this->pdo->prepare("
-            UPDATE images
+            UPDATE " . $this->tImages . "
             SET clasif_estado='error', clasif_error=:e, clasif_en=:t, actualizada_en=:t2, resultado=NULL
-            WHERE ruta_relativa = :k
+            WHERE workspace_slug = :ws AND ruta_relativa = :k
         ");
-        $stmt->execute([':e' => $mensaje, ':t' => $now, ':t2' => $now, ':k' => $key]);
+        $stmt->execute([':e' => $mensaje, ':t' => $now, ':t2' => $now, ':ws' => $this->ws(), ':k' => $key]);
     }
 
     public function marcarEmpty(string $key, string $mensaje = 'empty'): void
     {
         $now = date('Y-m-d H:i:s');
         $stmt = $this->pdo->prepare("
-            UPDATE images
+            UPDATE " . $this->tImages . "
             SET clasif_estado='empty',
                 clasif_error=:e,
                 clasif_en=:t,
@@ -522,9 +612,9 @@ class ImagenesIndex
                 detect_estado='na',
                 detect_error=NULL,
                 detect_en=NULL
-            WHERE ruta_relativa = :k
+            WHERE workspace_slug = :ws AND ruta_relativa = :k
         ");
-        $stmt->execute([':e' => $mensaje, ':t' => $now, ':t2' => $now, ':k' => $key]);
+        $stmt->execute([':e' => $mensaje, ':t' => $now, ':t2' => $now, ':ws' => $this->ws(), ':k' => $key]);
     }
 
     public function marcarProcesada(string $key, float $safe, float $unsafe): void
@@ -534,7 +624,7 @@ class ImagenesIndex
         $detectRequerida = ($resultado === 'unsafe') ? 1 : 0;
 
         $stmt = $this->pdo->prepare("
-            UPDATE images
+            UPDATE " . $this->tImages . "
             SET clasif_estado='ok',
                 safe=:s,
                 unsafe=:u,
@@ -550,7 +640,7 @@ class ImagenesIndex
                 END,
                 detect_error=CASE WHEN :dr = 0 THEN NULL ELSE detect_error END,
                 detect_en=CASE WHEN :dr = 0 THEN NULL ELSE detect_en END
-            WHERE ruta_relativa=:k
+            WHERE workspace_slug=:ws AND ruta_relativa=:k
         ");
         $stmt->execute([
             ':s' => $safe,
@@ -559,6 +649,7 @@ class ImagenesIndex
             ':t' => $now,
             ':t2' => $now,
             ':dr' => $detectRequerida,
+            ':ws' => $this->ws(),
             ':k' => $key
         ]);
     }
@@ -574,7 +665,7 @@ class ImagenesIndex
             // Nota: en algunos entornos SQLite/PDO la comparación de parámetros en CASE puede comportarse raro.
             // Para asegurar consistencia, armamos el UPDATE en PHP y solo seteamos clasif_* si tenemos resultado.
             $sql = "
-                UPDATE images
+                UPDATE " . $this->tImages . "
                 SET
                   detect_requerida=1,
                   detect_estado='ok',
@@ -603,17 +694,19 @@ class ImagenesIndex
                 $params[':t3'] = $now;
             }
 
-            $sql .= " WHERE ruta_relativa=:k";
+            $sql .= " WHERE workspace_slug=:ws AND ruta_relativa=:k";
 
+            $params[':ws'] = $this->ws();
             $upd = $this->pdo->prepare($sql);
             $upd->execute($params);
 
-            $del = $this->pdo->prepare("DELETE FROM detections WHERE image_ruta_relativa = :k");
-            $del->execute([':k' => $key]);
+            $ws = $this->ws();
+            $del = $this->pdo->prepare("DELETE FROM " . $this->tDetections . " WHERE workspace_slug = :ws AND image_ruta_relativa = :k");
+            $del->execute([':ws' => $ws, ':k' => $key]);
 
             $ins = $this->pdo->prepare("
-                INSERT INTO detections(image_ruta_relativa, label, score, x1, y1, x2, y2)
-                VALUES(:img, :label, :score, :x1, :y1, :x2, :y2)
+                INSERT INTO " . $this->tDetections . "(workspace_slug, image_ruta_relativa, label, score, x1, y1, x2, y2)
+                VALUES(:ws, :img, :label, :score, :x1, :y1, :x2, :y2)
             ");
 
             foreach ($detecciones as $d) {
@@ -633,6 +726,7 @@ class ImagenesIndex
                 }
 
                 $ins->execute([
+                    ':ws' => $ws,
                     ':img' => $key,
                     ':label' => $label,
                     ':score' => $score,
@@ -653,7 +747,7 @@ class ImagenesIndex
     {
         $now = date('Y-m-d H:i:s');
         $stmt = $this->pdo->prepare("
-            UPDATE images
+            UPDATE " . $this->tImages . "
             SET
               detect_requerida=1,
               detect_estado='error',
@@ -664,22 +758,25 @@ class ImagenesIndex
               clasif_error=:e2,
               clasif_en=:t3,
               resultado=NULL
-            WHERE ruta_relativa=:k
+            WHERE workspace_slug=:ws AND ruta_relativa=:k
         ");
-        $stmt->execute([':e' => $mensaje, ':e2' => $mensaje, ':t' => $now, ':t2' => $now, ':t3' => $now, ':k' => $key]);
+        $stmt->execute([':e' => $mensaje, ':e2' => $mensaje, ':t' => $now, ':t2' => $now, ':t3' => $now, ':ws' => $this->ws(), ':k' => $key]);
     }
 
     public function getEtiquetasDetectadas(bool $recalcularSiInconsistente = true): array
     {
-        $rows = $this->pdo->query("
+        $stmt = $this->pdo->prepare("
             SELECT label,
                    COUNT(DISTINCT image_ruta_relativa) as c,
                    MIN(score) as min_score,
                    MAX(score) as max_score
-            FROM detections
+            FROM " . $this->tDetections . "
+            WHERE workspace_slug = :ws
             GROUP BY label
             ORDER BY c DESC, label ASC
-        ")->fetchAll();
+        ");
+        $stmt->execute([':ws' => $this->ws()]);
+        $rows = $stmt->fetchAll();
         $out = [];
         foreach ($rows as $r) {
             $minScore = isset($r['min_score']) ? (float)$r['min_score'] : 0;
@@ -708,19 +805,18 @@ class ImagenesIndex
         $labelsNorm = array_values(array_unique($labelsNorm));
         if (empty($labelsNorm)) return [];
 
+        $ws = $this->ws();
         $placeholders = implode(',', array_fill(0, count($labelsNorm), '?'));
-        // Label normalizado: mayúsculas y espacios → _ (coincide aunque en BD esté "BELLY EXPOSED" o "belly_exposed")
         $labelCondition = "UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)";
-        // Comparación directa por score (sin ROUND) como antes
         $stmtTop = $this->pdo->prepare("
             SELECT d.image_ruta_relativa, MAX(d.score) as best_score
-            FROM detections d
-            WHERE $labelCondition AND d.score >= ?
+            FROM " . $this->tDetections . " d
+            WHERE d.workspace_slug = ? AND $labelCondition AND d.score >= ?
             GROUP BY d.image_ruta_relativa
             ORDER BY best_score DESC
             LIMIT " . self::MAX_RESULTADOS_BUSQUEDA_ETIQUETAS . "
         ");
-        $stmtTop->execute(array_merge($labelsNorm, [$umbral]));
+        $stmtTop->execute(array_merge([$ws], $labelsNorm, [$umbral]));
         $top = $stmtTop->fetchAll();
         if (empty($top)) return [];
 
@@ -728,10 +824,9 @@ class ImagenesIndex
         $bestByKey = [];
         foreach ($top as $r) $bestByKey[(string)$r['image_ruta_relativa']] = (float)$r['best_score'];
 
-        // Solo mantener imágenes que existan en el índice (evitar huérfanas)
         $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
-        $stmtExists = $this->pdo->prepare("SELECT ruta_relativa FROM images WHERE ruta_relativa IN ($ph2)");
-        $stmtExists->execute($imageKeys);
+        $stmtExists = $this->pdo->prepare("SELECT ruta_relativa FROM " . $this->tImages . " WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
+        $stmtExists->execute(array_merge([$ws], $imageKeys));
         $existingKeys = [];
         while ($row = $stmtExists->fetch(\PDO::FETCH_NUM)) {
             $existingKeys[(string)$row[0]] = true;
@@ -740,21 +835,21 @@ class ImagenesIndex
         if (empty($imageKeys)) return [];
 
         $ph2 = implode(',', array_fill(0, count($imageKeys), '?'));
-        $stmtInfo = $this->pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM images WHERE ruta_relativa IN ($ph2)");
-        $stmtInfo->execute($imageKeys);
+        $stmtInfo = $this->pdo->prepare("SELECT ruta_relativa, ruta_carpeta, archivo FROM " . $this->tImages . " WHERE workspace_slug = ? AND ruta_relativa IN ($ph2)");
+        $stmtInfo->execute(array_merge([$ws], $imageKeys));
         $infoRows = $stmtInfo->fetchAll();
         $infoByKey = [];
         foreach ($infoRows as $r) $infoByKey[(string)$r['ruta_relativa']] = $r;
 
         $stmtMatches = $this->pdo->prepare("
             SELECT d.image_ruta_relativa, d.label, MAX(d.score) as score
-            FROM detections d
-            WHERE d.image_ruta_relativa IN ($ph2)
+            FROM " . $this->tDetections . " d
+            WHERE d.workspace_slug = ? AND d.image_ruta_relativa IN ($ph2)
               AND UPPER(REPLACE(TRIM(d.label), ' ', '_')) IN ($placeholders)
               AND d.score >= ?
             GROUP BY d.image_ruta_relativa, d.label
         ");
-        $stmtMatches->execute(array_merge($imageKeys, $labelsNorm, [$umbral]));
+        $stmtMatches->execute(array_merge([$ws], $imageKeys, $labelsNorm, [$umbral]));
         $matchRows = $stmtMatches->fetchAll();
         $matchesByKey = [];
         foreach ($matchRows as $r) {
@@ -786,15 +881,16 @@ class ImagenesIndex
             return [];
         }
 
+        $ws = $this->ws();
         if ($tipo === 'error' || $tipo === 'empty') {
             $stmt = $this->pdo->prepare("
                 SELECT ruta_relativa, ruta_carpeta, archivo, clasif_estado, clasif_error, clasif_en
-                FROM images
-                WHERE clasif_estado = :st
+                FROM " . $this->tImages . "
+                WHERE workspace_slug = :ws AND clasif_estado = :st
                 ORDER BY COALESCE(clasif_en, actualizada_en) DESC
                 LIMIT 2000
             ");
-            $stmt->execute([':st' => $tipo]);
+            $stmt->execute([':ws' => $ws, ':st' => $tipo]);
             $rows = $stmt->fetchAll();
             $out = [];
             foreach ($rows as $r) {
@@ -817,14 +913,15 @@ class ImagenesIndex
         $fieldOther = ($tipo === 'unsafe') ? 'safe' : 'unsafe';
         $stmt = $this->pdo->prepare("
             SELECT ruta_relativa, ruta_carpeta, archivo, safe, unsafe, {$field} as score
-            FROM images
-            WHERE clasif_estado <> 'pending'
+            FROM " . $this->tImages . "
+            WHERE workspace_slug = :ws
+              AND clasif_estado <> 'pending'
               AND {$field} > {$fieldOther}
               AND {$field} >= :u
             ORDER BY score DESC
             LIMIT 2000
         ");
-        $stmt->execute([':u' => $umbral]);
+        $stmt->execute([':ws' => $ws, ':u' => $umbral]);
         $rows = $stmt->fetchAll();
         $out = [];
         foreach ($rows as $r) {

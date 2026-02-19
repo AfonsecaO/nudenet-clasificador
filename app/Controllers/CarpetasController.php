@@ -5,8 +5,8 @@ namespace App\Controllers;
 use App\Models\CarpetasIndex;
 use PDO;
 use App\Services\StringNormalizer;
-use App\Services\SqliteConnection;
-use App\Services\SqliteSchema;
+use App\Services\AppConnection;
+use App\Services\AppSchema;
 use App\Services\WorkspaceService;
 
 class CarpetasController extends BaseController
@@ -118,16 +118,18 @@ class CarpetasController extends BaseController
         $rutas = array_values(array_unique($rutas));
         if (empty($rutas)) return $carpetas;
 
-        $pdo = SqliteConnection::get();
-        SqliteSchema::ensure($pdo);
+        $pdo = AppConnection::get();
+        AppSchema::ensure($pdo);
+        $tImg = AppConnection::table('images');
+        $tDet = AppConnection::table('detections');
 
         $ph = implode(',', array_fill(0, count($rutas), '?'));
 
         // Tags por carpeta (conteo por imágenes distintas)
         $stmtTags = $pdo->prepare("
             SELECT i.ruta_carpeta as ruta, d.label as label, COUNT(DISTINCT i.ruta_relativa) as c
-            FROM images i
-            JOIN detections d ON d.image_ruta_relativa = i.ruta_relativa
+            FROM {$tImg} i
+            JOIN {$tDet} d ON d.image_ruta_relativa = i.ruta_relativa
             WHERE COALESCE(i.ruta_carpeta,'') IN ($ph)
             GROUP BY i.ruta_carpeta, d.label
         ");
@@ -147,7 +149,7 @@ class CarpetasController extends BaseController
         // Pendientes por carpeta
         $stmtPend = $pdo->prepare("
             SELECT i.ruta_carpeta as ruta, COUNT(*) as c
-            FROM images i
+            FROM {$tImg} i
             WHERE COALESCE(i.ruta_carpeta,'') IN ($ph)
               AND (
                 COALESCE(i.detect_estado,'') <> 'ok'
@@ -219,18 +221,20 @@ class CarpetasController extends BaseController
         if (empty($rutas)) return $carpetas;
 
         $ph = implode(',', array_fill(0, count($rutas), '?'));
+        $tImg = AppConnection::table('images');
+        $tDet = AppConnection::table('detections');
 
         $stmt = $pdo->prepare("
             SELECT i.ruta_carpeta AS ruta, d.image_ruta_relativa AS img, d.label AS label, d.score AS score, d.x1, d.y1, d.x2, d.y2
-            FROM images i
-            JOIN detections d ON d.image_ruta_relativa = i.ruta_relativa
-            WHERE i.ruta_carpeta IN ($ph) AND d.label IN ('FACE_FEMALE', 'FACE_MALE', 'FEMALE_BREAST_EXPOSED', 'FEMALE_BREAST_COVERED')
+            FROM {$tImg} i
+            JOIN {$tDet} d ON d.workspace_slug = i.workspace_slug AND d.image_ruta_relativa = i.ruta_relativa
+            WHERE i.workspace_slug = ? AND i.ruta_carpeta IN ($ph) AND d.label IN ('FACE_FEMALE', 'FACE_MALE', 'FEMALE_BREAST_EXPOSED', 'FEMALE_BREAST_COVERED')
               AND d.x1 IS NOT NULL AND d.y1 IS NOT NULL AND d.x2 IS NOT NULL AND d.y2 IS NOT NULL
             ORDER BY i.ruta_carpeta, d.score DESC, (d.x2 - d.x1) * (d.y2 - d.y1) DESC,
               CASE d.label WHEN 'FACE_FEMALE' THEN 0 WHEN 'FACE_MALE' THEN 1 WHEN 'FEMALE_BREAST_EXPOSED' THEN 2 WHEN 'FEMALE_BREAST_COVERED' THEN 3 ELSE 4 END,
               i.ruta_relativa
         ");
-        $stmt->execute($rutas);
+        $stmt->execute(array_merge([$slug], $rutas));
         $rows = $stmt->fetchAll() ?: [];
 
         $firstByRuta = [];
@@ -373,7 +377,7 @@ class CarpetasController extends BaseController
     {
         $ws = WorkspaceService::current();
         if ($ws === null || empty($carpetas)) return $carpetas;
-        return $this->enriquecerCarpetasConAvataresParaWorkspace($ws, $carpetas, SqliteConnection::get());
+        return $this->enriquecerCarpetasConAvataresParaWorkspace($ws, $carpetas, AppConnection::get());
     }
 
     public function buscar()
@@ -497,9 +501,11 @@ class CarpetasController extends BaseController
                 ], 404);
             }
             
-            // --- Lookup SQLite: estado + tags por imagen de esta carpeta ---
-            $pdo = \App\Services\SqliteConnection::get();
-            \App\Services\SqliteSchema::ensure($pdo);
+            // --- Lookup estado + tags por imagen de esta carpeta ---
+            $pdo = AppConnection::get();
+            AppSchema::ensure($pdo);
+            $tImg = AppConnection::table('images');
+            $tDet = AppConnection::table('detections');
 
             $rutaNorm = str_replace('\\', '/', (string)$ruta);
             $rutaNorm = trim($rutaNorm, '/');
@@ -510,8 +516,8 @@ class CarpetasController extends BaseController
                   i.clasif_estado,
                   i.detect_estado,
                   d.label
-                FROM images i
-                LEFT JOIN detections d
+                FROM {$tImg} i
+                LEFT JOIN {$tDet} d
                   ON d.image_ruta_relativa = i.ruta_relativa
                 WHERE COALESCE(i.ruta_carpeta,'') = :rc
             ");

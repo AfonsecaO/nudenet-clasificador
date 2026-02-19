@@ -9,6 +9,38 @@ namespace App\Models;
 class CarpetasIndex
 {
     private $pdo;
+    private $tFolders;
+    private $tImages;
+
+    private function ws(): string
+    {
+        return \App\Services\AppConnection::currentSlug() ?? 'default';
+    }
+
+    private function buildFoldersInsertStmt(): \PDOStatement
+    {
+        $driver = \App\Services\AppConnection::getCurrentDriver();
+        if ($driver === 'mysql') {
+            return $this->pdo->prepare("
+                INSERT INTO " . $this->tFolders . "(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+                VALUES(:ws, :ruta, :nombre, :search_key, :total, :t)
+                ON DUPLICATE KEY UPDATE
+                  nombre = VALUES(nombre),
+                  search_key = VALUES(search_key),
+                  total_imagenes = VALUES(total_imagenes),
+                  actualizada_en = VALUES(actualizada_en)
+            ");
+        }
+        return $this->pdo->prepare("
+            INSERT INTO " . $this->tFolders . "(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+            VALUES(:ws, :ruta, :nombre, :search_key, :total, :t)
+            ON CONFLICT(workspace_slug, ruta_carpeta) DO UPDATE SET
+              nombre=excluded.nombre,
+              search_key=excluded.search_key,
+              total_imagenes=excluded.total_imagenes,
+              actualizada_en=excluded.actualizada_en
+        ");
+    }
 
     private function nombreDesdeRuta(string $ruta): string
     {
@@ -21,13 +53,17 @@ class CarpetasIndex
     public function __construct()
     {
         \App\Services\ConfigService::cargarYValidar();
-        $this->pdo = \App\Services\SqliteConnection::get();
-        \App\Services\SqliteSchema::ensure($this->pdo);
+        $this->pdo = \App\Services\AppConnection::get();
+        \App\Services\AppSchema::ensure($this->pdo);
+        $this->tFolders = \App\Services\AppConnection::table('folders');
+        $this->tImages = \App\Services\AppConnection::table('images');
     }
 
     public function getCarpetas(): array
     {
-        $rows = $this->pdo->query('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM folders ORDER BY ruta_carpeta ASC')->fetchAll();
+        $stmt = $this->pdo->prepare('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws ORDER BY ruta_carpeta ASC');
+        $stmt->execute([':ws' => $this->ws()]);
+        $rows = $stmt->fetchAll();
         $out = [];
         foreach ($rows as $r) {
             $ruta = (string)($r['ruta'] ?? '');
@@ -55,11 +91,12 @@ class CarpetasIndex
 
         $stmt = $this->pdo->prepare("
             SELECT ruta_carpeta as ruta, nombre, total_imagenes
-            FROM folders
-            WHERE COALESCE(search_key, '') LIKE :q
+            FROM " . $this->tFolders . "
+            WHERE workspace_slug = :ws AND COALESCE(search_key, '') LIKE :q
             ORDER BY total_imagenes DESC, ruta_carpeta ASC
             LIMIT :lim
         ");
+        $stmt->bindValue(':ws', $this->ws(), \PDO::PARAM_STR);
         $stmt->bindValue(':q', '%' . $searchKey . '%', \PDO::PARAM_STR);
         $stmt->bindValue(':lim', $limit, \PDO::PARAM_INT);
         $stmt->execute();
@@ -86,26 +123,23 @@ class CarpetasIndex
      */
     public function regenerarDesdeImagenes(ImagenesIndex $imagenesIndex): array
     {
+        $ws = $this->ws();
         $ahora = date('Y-m-d H:i:s');
         $this->pdo->beginTransaction();
         try {
-            $this->pdo->exec('DELETE FROM folders');
+            $del = $this->pdo->prepare('DELETE FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws');
+            $del->execute([':ws' => $ws]);
 
-            $rows = $this->pdo->query("
+            $stmtImg = $this->pdo->prepare("
                 SELECT COALESCE(ruta_carpeta, '') as ruta, COUNT(*) as total
-                FROM images
+                FROM " . $this->tImages . "
+                WHERE workspace_slug = :ws
                 GROUP BY COALESCE(ruta_carpeta, '')
-            ")->fetchAll();
-
-            $stmt = $this->pdo->prepare("
-                INSERT INTO folders(ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
-                VALUES(:ruta, :nombre, :search_key, :total, :t)
-                ON CONFLICT(ruta_carpeta) DO UPDATE SET
-                  nombre=excluded.nombre,
-                  search_key=excluded.search_key,
-                  total_imagenes=excluded.total_imagenes,
-                  actualizada_en=excluded.actualizada_en
             ");
+            $stmtImg->execute([':ws' => $ws]);
+            $rows = $stmtImg->fetchAll();
+
+            $stmt = $this->buildFoldersInsertStmt();
 
             foreach ($rows as $r) {
                 $ruta = (string)($r['ruta'] ?? '');
@@ -113,6 +147,7 @@ class CarpetasIndex
                 $nombre = ($ruta === '') ? '' : $this->nombreDesdeRuta($ruta);
                 $searchKey = \App\Services\StringNormalizer::toSearchKey($ruta . ' ' . $nombre);
                 $stmt->execute([
+                    ':ws' => $ws,
                     ':ruta' => $ruta,
                     ':nombre' => $nombre,
                     ':search_key' => $searchKey,
@@ -127,8 +162,12 @@ class CarpetasIndex
             throw $e;
         }
 
-        $totalCarpetas = (int)$this->pdo->query('SELECT COUNT(*) FROM folders')->fetchColumn();
-        $totalImagenes = (int)$this->pdo->query('SELECT SUM(total_imagenes) FROM folders')->fetchColumn();
+        $cnt = $this->pdo->prepare('SELECT COUNT(*) FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws');
+        $cnt->execute([':ws' => $ws]);
+        $totalCarpetas = (int)$cnt->fetchColumn();
+        $sum = $this->pdo->prepare('SELECT COALESCE(SUM(total_imagenes),0) FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws');
+        $sum->execute([':ws' => $ws]);
+        $totalImagenes = (int)$sum->fetchColumn();
 
         return [
             'total_carpetas' => $totalCarpetas,

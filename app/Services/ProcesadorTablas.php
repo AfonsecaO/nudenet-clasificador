@@ -73,82 +73,45 @@ class ProcesadorTablas
     }
 
     /**
-     * Obtiene el siguiente registro de una tabla
+     * Obtiene el siguiente registro de una tabla (WHERE id > ultimo_id ORDER BY id ASC LIMIT 1).
+     * ultimo_id en estado = último ID procesado.
      */
     public function obtenerSiguienteRegistro($tabla)
     {
         try {
-            // Inicializar tabla en el estado si no existe
             $this->estadoTracker->inicializarTabla($tabla);
-            
-            // Obtener último ID procesado
             $ultimoId = $this->estadoTracker->getUltimoId($tabla);
-            
-            // Construir lista de columnas para la query
+
             $columnasStr = implode(', ', array_map(function($col) {
                 return "`{$col}`";
             }, $this->columnas));
-            
-            // Query para obtener el siguiente registro
+
             $sql = "SELECT {$columnasStr} 
                     FROM `{$tabla}` 
                     WHERE `{$this->primaryKey}` > :ultimo_id 
                     ORDER BY `{$this->primaryKey}` ASC 
                     LIMIT 1";
-            
+
             $conn = $this->database->getConnection();
             $stmt = $conn->prepare($sql);
             $stmt->execute([':ultimo_id' => $ultimoId]);
-            
             $registro = $stmt->fetch();
-            
+
             if ($registro) {
-                // Obtener max_id del estado si existe
-                $estadoTabla = $this->estadoTracker->getEstado()[$tabla] ?? null;
-                $maxId = $estadoTabla['max_id'] ?? null;
-                $idActual = $registro[$this->primaryKey];
-                
-                // Si tenemos el max_id en el estado, usarlo para comparar
-                if ($maxId !== null) {
-                    $faltanRegistros = ($idActual < $maxId);
-                } else {
-                    // Si no tenemos el max_id, obtenerlo de la BD
-                    $sqlMax = "SELECT MAX(`{$this->primaryKey}`) as max_id FROM `{$tabla}`";
-                    $stmtMax = $conn->prepare($sqlMax);
-                    $stmtMax->execute();
-                    $resultadoMax = $stmtMax->fetch();
-                    $maxIdBd = $resultadoMax['max_id'] !== null ? (int)$resultadoMax['max_id'] : 0;
-                    
-                    // Guardar el max_id en el estado
-                    if ($maxIdBd > 0) {
-                        $this->estadoTracker->actualizarMaxId($tabla, $maxIdBd);
-                    }
-                    
-                    $faltanRegistros = ($idActual < $maxIdBd);
-                }
-                
-                // Actualizar estado
-                $this->estadoTracker->actualizarUltimoId(
-                    $tabla, 
-                    $idActual, 
-                    $faltanRegistros
-                );
-                
+                $idActual = (int)$registro[$this->primaryKey];
+                $this->estadoTracker->actualizarUltimoId($tabla, $idActual, null);
                 return [
                     'success' => true,
                     'registro' => $registro,
-                    'faltan_registros' => $faltanRegistros
-                ];
-            } else {
-                // No hay más registros
-                $this->estadoTracker->actualizarUltimoId($tabla, $ultimoId, false);
-                
-                return [
-                    'success' => true,
-                    'registro' => null,
-                    'faltan_registros' => false
+                    'faltan_registros' => $this->estadoTracker->faltanRegistros($tabla)
                 ];
             }
+            $this->estadoTracker->actualizarUltimoId($tabla, $ultimoId, false);
+            return [
+                'success' => true,
+                'registro' => null,
+                'faltan_registros' => false
+            ];
         } catch (PDOException $e) {
             return [
                 'success' => false,

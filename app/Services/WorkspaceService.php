@@ -6,7 +6,7 @@ namespace App\Services;
  * Manejo de workspaces (aislamiento por ambiente).
  *
  * Estructura:
- *   workspaces/<slug>/{db,images,logs,cache}
+ *   workspaces/<slug>/{images,logs,cache}  (sin db; la BD es única en database/)
  */
 class WorkspaceService
 {
@@ -122,21 +122,19 @@ class WorkspaceService
     }
 
     /**
-     * Devuelve paths absolutos del workspace.
+     * Devuelve paths absolutos del workspace (sin db; la BD es única en database/).
      *
-     * @return array{dbPath:string,imagesDir:string,logsDir:string,cacheDir:string,thumbsDir:string,avatarsDir:string}
+     * @return array{imagesDir:string,logsDir:string,cacheDir:string,thumbsDir:string,avatarsDir:string}
      */
     public static function paths(string $slug): array
     {
         $root = self::root($slug);
-        $dbDir = $root . DIRECTORY_SEPARATOR . 'db';
         $imagesDir = $root . DIRECTORY_SEPARATOR . 'images';
         $logsDir = $root . DIRECTORY_SEPARATOR . 'logs';
         $cacheDir = $root . DIRECTORY_SEPARATOR . 'cache';
         $thumbsDir = $cacheDir . DIRECTORY_SEPARATOR . 'thumbs';
         $avatarsDir = $cacheDir . DIRECTORY_SEPARATOR . 'avatars';
         return [
-            'dbPath' => $dbDir . DIRECTORY_SEPARATOR . 'clasificador.sqlite',
             'imagesDir' => $imagesDir,
             'logsDir' => $logsDir,
             'cacheDir' => $cacheDir,
@@ -181,7 +179,7 @@ class WorkspaceService
         if (!is_dir($base)) return false;
 
         $p = self::paths($slug);
-        foreach ([$p['imagesDir'], dirname($p['dbPath']), $p['logsDir'], $p['cacheDir'], $p['thumbsDir'], $p['avatarsDir']] as $dir) {
+        foreach ([$p['imagesDir'], $p['logsDir'], $p['cacheDir'], $p['thumbsDir'], $p['avatarsDir']] as $dir) {
             if (!is_dir($dir)) {
                 @mkdir($dir, 0755, true);
             }
@@ -191,25 +189,48 @@ class WorkspaceService
     }
 
     /**
+     * Borra todos los datos del workspace en la BD compartida (todas las tablas con workspace_slug).
+     */
+    public static function deleteWorkspaceData(string $slug): void
+    {
+        $slug = self::slugify($slug);
+        if (!self::isValidSlug($slug)) return;
+
+        try {
+            $pdo = AppConnection::get();
+            $tables = ['meta', 'app_config', 'tables_state', 'tables_index', 'images', 'folders', 'detections'];
+            foreach ($tables as $name) {
+                $table = AppConnection::table($name);
+                $stmt = $pdo->prepare("DELETE FROM {$table} WHERE workspace_slug = :ws");
+                $stmt->execute([':ws' => $slug]);
+            }
+        } catch (\Throwable $e) {
+            // No bloquear la eliminación del directorio si la BD falla
+        }
+    }
+
+    /**
      * Elimina un workspace completo (NO hay marcha atrás).
-     * - Valida slug
-     * - Protege contra path traversal (realpath dentro de baseDir)
+     * - Borra datos en la BD compartida (deleteWorkspaceData)
+     * - Borra la carpeta workspaces/<slug>/ (imágenes, logs, cache)
+     * - Valida slug y protege contra path traversal
      */
     public static function deleteWorkspace(string $slug): bool
     {
         $slug = self::slugify($slug);
         if (!self::isValidSlug($slug)) return false;
 
+        self::deleteWorkspaceData($slug);
+
         $base = self::baseDir();
         $root = self::root($slug);
 
-        if (!is_dir($root)) return false;
+        if (!is_dir($root)) return true;
 
         $baseReal = realpath($base);
         $rootReal = realpath($root);
         if ($baseReal === false || $rootReal === false) return false;
 
-        // Asegurar que rootReal está dentro de baseReal
         $baseReal = rtrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $baseReal), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         $rootReal = rtrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $rootReal), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         if (strpos($rootReal, $baseReal) !== 0) return false;

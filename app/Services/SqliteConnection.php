@@ -9,20 +9,24 @@ class SqliteConnection
     private static ?PDO $pdo = null;
     private static ?string $pdoWorkspace = null;
 
+    /**
+     * Ruta del archivo SQLite único (almacenamiento global).
+     * Si el motor no es SQLite, devuelve cadena vacía.
+     */
     public static function path(): string
     {
-        $ws = WorkspaceService::current();
-        if ($ws === null) {
-            // Fallback legacy (solo para casos antes de seleccionar workspace)
-            $dbDir = __DIR__ . '/../../tmp/db';
+        if (!StorageEngineConfig::storageEngineFileExists()) {
+            $dbDir = __DIR__ . '/../../database';
             if (!is_dir($dbDir)) {
                 @mkdir($dbDir, 0755, true);
             }
             return $dbDir . '/clasificador.sqlite';
         }
-
-        WorkspaceService::ensureStructure($ws);
-        return WorkspaceService::paths($ws)['dbPath'];
+        $driver = StorageEngineConfig::getStorageEngine();
+        if ($driver !== 'sqlite') {
+            return '';
+        }
+        return StorageEngineConfig::sqlitePath();
     }
 
     public static function get(): PDO

@@ -8,6 +8,17 @@
  */
 
 return [
+    // Wizard inicial: elegir motor de BD (una sola vez; aplica a todos los workspaces)
+    'storage_engine_select' => [
+        'controller' => 'StorageEngineController',
+        'method' => 'index',
+        'type' => 'view'
+    ],
+    'storage_engine_save' => [
+        'controller' => 'StorageEngineController',
+        'method' => 'save',
+        'type' => 'api'
+    ],
     // Workspace selection (obligatorio antes del resto)
     'workspace_select' => [
         'controller' => 'WorkspaceController',
@@ -44,7 +55,16 @@ return [
         'method' => 'buscarImagenesEtiquetasConsolidado',
         'type' => 'api'
     ],
-
+    'workspace_global_config' => [
+        'controller' => 'WorkspaceController',
+        'method' => 'globalConfig',
+        'type' => 'view'
+    ],
+    'workspace_global_config_save' => [
+        'controller' => 'WorkspaceController',
+        'method' => 'globalConfigSave',
+        'type' => 'api'
+    ],
     // API Routes
     'obtener_tablas' => [
         'controller' => 'TablasController',

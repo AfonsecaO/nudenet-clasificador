@@ -5,7 +5,7 @@ $__bodyClass = '';
 
 <div class="error-page">
   <div class="error-card">
-    <h1><i class="fas fa-shield-alt"></i> Clasificador</h1>
+    <h1><i class="fas fa-shield-alt"></i> PhotoClassifier</h1>
     <p class="text-muted mb-2">Error de configuración</p>
 
     <div class="error-msg">

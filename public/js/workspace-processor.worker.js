@@ -37,8 +37,8 @@ async function runDownloadLoop(ws) {
     const { ok, data } = await fetchJson(url);
     self.postMessage({ type: 'tick', mode: 'download', ws, ok, data });
     if (!ok || !data?.success) break;
-    // Solo terminar cuando no queden registros en ninguna tabla (siguiente petición seguirá con otra tabla si hay)
-    const noMoreWork = data?.registro_procesado === false;
+    // Solo terminar cuando no se procesó registro Y ya no faltan registros (id <= max_id); si hay huecos, registro_procesado puede ser false pero faltan_registros true
+    const noMoreWork = data?.registro_procesado === false && !data?.faltan_registros;
     if (noMoreWork) {
       downloadSet.delete(ws);
       self.postMessage({ type: 'done', mode: 'download', ws });
@@ -54,6 +54,11 @@ async function runClassifyLoop(ws) {
     const { ok, data } = await fetchJson(url);
     self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data });
     if (!ok || !data?.success) break;
+    if (data?.stopped_due_to_classifier_error) {
+      classifySet.delete(ws);
+      self.postMessage({ type: 'done', mode: 'classify', ws, stoppedDueToError: true });
+      break;
+    }
     const noMoreWork = data?.procesada === false && (data?.pendientes ?? data?.pending ?? 0) === 0;
     if (noMoreWork) {
       classifySet.delete(ws);
