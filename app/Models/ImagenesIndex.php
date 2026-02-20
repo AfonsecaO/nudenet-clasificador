@@ -111,11 +111,11 @@ class ImagenesIndex
                 INSERT INTO " . $this->tImages . " (
                   workspace_slug, ruta_relativa, ruta_completa, ruta_carpeta, archivo,
                   indexada, indexada_en, actualizada_en, mtime, tamano, seen_run,
-                  clasif_estado, detect_requerida, detect_estado
+                  clasif_estado, detect_requerida, detect_estado, raw_md5
                 ) VALUES (
                   :ws, :k, :full, :folder, :file,
                   1, :now, :now2, :mtime, :size, 1,
-                  'pending', 1, 'pending'
+                  'pending', 1, 'pending', :raw_md5
                 )
                 ON DUPLICATE KEY UPDATE
                   ruta_completa = VALUES(ruta_completa),
@@ -125,18 +125,19 @@ class ImagenesIndex
                   actualizada_en = VALUES(actualizada_en),
                   mtime = VALUES(mtime),
                   tamano = VALUES(tamano),
-                  seen_run = 1
+                  seen_run = 1,
+                  raw_md5 = VALUES(raw_md5)
             ");
         }
         return $this->pdo->prepare("
             INSERT INTO " . $this->tImages . "(
               workspace_slug, ruta_relativa, ruta_completa, ruta_carpeta, archivo,
               indexada, indexada_en, actualizada_en, mtime, tamano, seen_run,
-              clasif_estado, detect_requerida, detect_estado
+              clasif_estado, detect_requerida, detect_estado, raw_md5
             ) VALUES(
               :ws, :k, :full, :folder, :file,
               1, :now, :now2, :mtime, :size, 1,
-              'pending', 1, 'pending'
+              'pending', 1, 'pending', :raw_md5
             )
             ON CONFLICT(workspace_slug, ruta_relativa) DO UPDATE SET
               ruta_completa=excluded.ruta_completa,
@@ -146,7 +147,8 @@ class ImagenesIndex
               actualizada_en=excluded.actualizada_en,
               mtime=excluded.mtime,
               tamano=excluded.tamano,
-              seen_run=1
+              seen_run=1,
+              raw_md5=excluded.raw_md5
         ");
     }
 
@@ -449,8 +451,9 @@ class ImagenesIndex
 
     /**
      * Upsert incremental desde rutas ya materializadas.
+     * @param array $rawMd5PorRuta opcional: mapa ruta_completa => raw_md5 para persistir en el índice
      */
-    public function upsertDesdeRutas(array $rutasCompletas, ?string $directorioBase = null): array
+    public function upsertDesdeRutas(array $rutasCompletas, ?string $directorioBase = null, array $rawMd5PorRuta = []): array
     {
         $ws = $this->ws();
         $directorioBaseReal = rtrim(($directorioBase ?? self::resolverDirectorioBaseImagenes()), "/\\");
@@ -503,6 +506,7 @@ class ImagenesIndex
                 $exists = ($stmtCheck->fetchColumn() !== false);
                 if ($exists) $existentes++; else $nuevas++;
 
+                $rawMd5 = $rawMd5PorRuta[$ruta] ?? $rawMd5PorRuta[$rutaRealpath] ?? null;
                 $stmtUpsert->execute([
                     ':ws' => $ws,
                     ':k' => $rutaRelativa,
@@ -512,7 +516,8 @@ class ImagenesIndex
                     ':now' => $ahora,
                     ':now2' => $ahora,
                     ':mtime' => @filemtime($rutaRealpath) ?: null,
-                    ':size' => @filesize($rutaRealpath) ?: null
+                    ':size' => @filesize($rutaRealpath) ?: null,
+                    ':raw_md5' => ($rawMd5 !== null && strlen((string)$rawMd5) === 32) ? $rawMd5 : null
                 ]);
 
                 // Guardar MD5 si es posible (si hay duplicado, el índice único puede rechazarlo)

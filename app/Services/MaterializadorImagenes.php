@@ -40,19 +40,57 @@ class MaterializadorImagenes
     }
 
     /**
+     * Devuelve los MD5 que ya existen en el índice (content_md5 o raw_md5) para el workspace actual.
+     * Una o dos consultas en lugar de N.
+     */
+    private function obtenerMd5ExistentesEnBatch(array $md5List): array
+    {
+        $md5List = array_values(array_unique(array_filter(array_map(function ($m) {
+            $m = strtolower(trim((string) $m));
+            return (strlen($m) === 32) ? $m : null;
+        }, $md5List))));
+        if (empty($md5List)) {
+            return [];
+        }
+        $existentes = [];
+        try {
+            $pdo = AppConnection::get();
+            AppSchema::ensure($pdo);
+            $tImg = AppConnection::table('images');
+            $ws = AppConnection::currentSlug() ?? 'default';
+            $ph = implode(',', array_fill(0, count($md5List), '?'));
+            $params = array_merge([$ws], $md5List);
+            $stmt = $pdo->prepare("SELECT content_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND content_md5 IN ({$ph})");
+            $stmt->execute($params);
+            while (($row = $stmt->fetch(\PDO::FETCH_NUM)) !== false && isset($row[0]) && $row[0] !== '') {
+                $existentes[$row[0]] = true;
+            }
+            $stmt = $pdo->prepare("SELECT raw_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND raw_md5 IN ({$ph})");
+            $stmt->execute($params);
+            while (($row = $stmt->fetch(\PDO::FETCH_NUM)) !== false && isset($row[0]) && $row[0] !== '') {
+                $existentes[$row[0]] = true;
+            }
+        } catch (\Throwable $e) {
+            // Silencioso: no bloquear materialización
+        }
+        return $existentes;
+    }
+
+    /**
      * Comprueba si ya existe una imagen con este MD5 (content_md5 o raw_md5) en el workspace actual.
+     * Usa seenMd5 (precargado en batch desde materializarImagenesRegistro) para evitar consultas extra.
      */
     private function yaExisteMd5(string $md5): bool
     {
         $md5 = strtolower(trim($md5));
         if (strlen($md5) !== 32) return false;
 
-        // Dedupe rápido dentro del mismo registro/ejecución
+        // Dedupe rápido dentro del mismo registro/ejecución (incluye batch precargado)
         if (isset($this->seenMd5[$md5])) {
             return true;
         }
 
-        // Dedupe global contra el índice (content_md5 del archivo o raw_md5 de la imagen tal cual vino de la BD)
+        // Dedupe global contra el índice (solo si no se precargó en batch)
         try {
             $pdo = AppConnection::get();
             AppSchema::ensure($pdo);
@@ -419,8 +457,8 @@ class MaterializadorImagenes
             }
 
             // Calcular MD5 del archivo a guardar (por si el mismo contenido comprimido ya existía)
-            $md5 = md5($toSave);
-            if ($this->yaExisteMd5($md5)) {
+            $md5 = strtolower(md5($toSave));
+            if (isset($this->seenMd5[$md5])) {
                 return [
                     'success' => true,
                     'duplicate' => true,
@@ -458,12 +496,30 @@ class MaterializadorImagenes
     }
 
     /**
-     * Materializa todas las imágenes de un registro
+     * Materializa todas las imágenes de un registro.
+     * Precarga seenMd5 con un batch de MD5 existentes en BD para reducir consultas de dedupe.
      */
     public function materializarImagenesRegistro($registro, $columnasImagen, $campoIdentificador, $campoUsrId, $campoFecha, $campoResultado = null)
     {
         $resultados = [];
         $this->seenMd5 = [];
+
+        // Precalcular raw_md5 de todas las columnas con datos y cargar en batch los MD5 ya existentes en BD
+        $rawMd5List = [];
+        foreach ($columnasImagen as $columna) {
+            if (isset($registro[$columna]) && !empty($registro[$columna]) && $this->esImagenValida($registro[$columna])) {
+                $bin = $this->extraerDatosImagen($registro[$columna]);
+                if (is_string($bin) && $bin !== '') {
+                    $rawMd5List[] = strtolower(md5($bin));
+                }
+            }
+        }
+        if (!empty($rawMd5List)) {
+            $existentes = $this->obtenerMd5ExistentesEnBatch($rawMd5List);
+            foreach ($existentes as $m => $_) {
+                $this->seenMd5[$m] = true;
+            }
+        }
         
         // Aplicar trim a todas las variables
         $identificador = trim($registro[$campoIdentificador] ?? '');

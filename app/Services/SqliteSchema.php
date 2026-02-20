@@ -170,6 +170,7 @@ class SqliteSchema
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_seen_run ON images(seen_run)");
         $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_images_ws_content_md5 ON images(workspace_slug, content_md5)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_content_md5 ON images(content_md5)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_ws_raw_md5 ON images(workspace_slug, raw_md5)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_mtime ON images(mtime)");
 
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_detections_ws ON detections(workspace_slug)");
