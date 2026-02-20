@@ -55,6 +55,12 @@
     return wrap;
   }
 
+  function getGridLoaderHtml() {
+    return '<div class="grid-loader-overlay col-12" role="status" aria-live="polite">' +
+      '<span class="grid-loader-spinner" aria-hidden="true"></span>' +
+      '<span class="grid-loader-text">Cargando…</span></div>';
+  }
+
   function removeThumbLoader(card) {
     const loader = card ? card.querySelector('.thumb-loader') : null;
     if (loader) loader.remove();
@@ -462,7 +468,7 @@
     const gridThumbs = cfg.refs.gridThumbs;
     if (ttlCarpeta) ttlCarpeta.textContent = lastFolder.nombre || 'Carpeta';
     if (tagsCarpeta) tagsCarpeta.innerHTML = '';
-    if (gridThumbs) gridThumbs.innerHTML = '';
+    if (gridThumbs) gridThumbs.innerHTML = getGridLoaderHtml();
 
     showModal(cfg.refs.modalCarpeta);
 
@@ -473,6 +479,7 @@
 
     if (!ok || !data?.success) {
       if (gridThumbs) {
+        gridThumbs.innerHTML = '';
         const div = document.createElement('div');
         div.className = 'col-12 text-danger';
         div.textContent = String(data?.error || 'Error');
@@ -482,6 +489,7 @@
       return;
     }
     folderFiles = Array.isArray(data.archivos) ? data.archivos : [];
+    if (gridThumbs) gridThumbs.innerHTML = '';
     renderFolderTags();
     renderFolderGrid();
 
@@ -551,7 +559,7 @@
     const ttlCarpetaStacked = cfg.refs.ttlCarpetaStacked;
     const gridThumbsStacked = cfg.refs.gridThumbsStacked;
     if (ttlCarpetaStacked) ttlCarpetaStacked.textContent = lastFolderStacked.nombre || 'Carpeta';
-    if (gridThumbsStacked) gridThumbsStacked.innerHTML = '';
+    if (gridThumbsStacked) gridThumbsStacked.innerHTML = getGridLoaderHtml();
 
     showModal(cfg.refs.modalCarpetaStacked);
 
@@ -562,6 +570,7 @@
 
     if (!ok || !data?.success) {
       if (gridThumbsStacked) {
+        gridThumbsStacked.innerHTML = '';
         const div = document.createElement('div');
         div.className = 'col-12 text-danger';
         div.textContent = String(data?.error || 'Error');
@@ -571,6 +580,7 @@
       return;
     }
     folderFilesStacked = Array.isArray(data.archivos) ? data.archivos : [];
+    if (gridThumbsStacked) gridThumbsStacked.innerHTML = '';
     renderFolderGridStacked();
 
     if (folderSelectedImageRutaStacked && gridThumbsStacked) {
@@ -631,15 +641,17 @@
     const arr = Array.isArray(items) ? items : [];
     if (ttlCarpeta) ttlCarpeta.textContent = 'Resultados de búsqueda (' + arr.length + ')';
     if (tagsCarpeta) tagsCarpeta.innerHTML = '';
-    gridThumbs.innerHTML = '';
+    gridThumbs.innerHTML = getGridLoaderHtml();
+    showModal(cfg.refs.modalCarpeta);
     if (!arr.length) {
+      gridThumbs.innerHTML = '';
       const div = document.createElement('div');
       div.className = 'col-12 text-muted';
       div.textContent = 'Sin resultados';
       gridThumbs.appendChild(div);
-      showModal(cfg.refs.modalCarpeta);
       return;
     }
+    const fragment = document.createDocumentFragment();
     for (let i = 0; i < arr.length; i++) {
       const it = arr[i];
       const ws = String(it?.workspace || '').trim();
@@ -675,10 +687,11 @@
       });
       card.appendChild(a);
       col.appendChild(card);
-      gridThumbs.appendChild(col);
+      fragment.appendChild(col);
       scheduleThumbLoad(col, card, img, thumbUrlResultados);
     }
-    showModal(cfg.refs.modalCarpeta);
+    gridThumbs.innerHTML = '';
+    while (fragment.firstChild) gridThumbs.appendChild(fragment.firstChild);
   }
 
   function moveFocusOutOfModal(modalEl) {
