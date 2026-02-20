@@ -189,6 +189,7 @@ class MysqlSchema
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_seen_run', 'seen_run', false);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_ws_content_md5', 'workspace_slug, content_md5', true);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_content_md5', 'content_md5', false);
+        self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_ws_raw_md5', 'workspace_slug, raw_md5', false);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_mtime', 'mtime', false);
         self::createIndexIfNotExists($pdo, $foldersTable, 'idx_folders_ws', 'workspace_slug', false);
         self::createIndexIfNotExists($pdo, $foldersTable, 'idx_folders_ws_search_key', 'workspace_slug, search_key(191)', false);

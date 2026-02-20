@@ -84,133 +84,122 @@ class ProcesarController extends BaseController
             $duplicadasCols = [];
             $mensaje = '';
             $registroId = null;
+            $clasificacionStats = null;
 
-            // Buscar la primera tabla con registros pendientes (solo usando el estado, sin consultar BD)
-            foreach ($tablasDelEstado as $tabla) {
-                // Verificar si faltan registros (solo usando el estado)
-                if (!$estadoTracker->faltanRegistros($tabla)) {
-                    continue;
-                }
-                
-                $tablaProcesada = $tabla;
-                LogService::append([
-                    'type' => 'info',
-                    'message' => 'Procesando tabla: ' . $tabla,
-                ]);
+            $limiteRegistros = 1;
+            try {
+                $n = (int) \App\Services\ConfigService::obtenerOpcional('MATERIALIZAR_REGISTROS_POR_PETICION', '1');
+                $limiteRegistros = max(1, min(5, $n));
+            } catch (\Throwable $e) {
+                $limiteRegistros = 1;
+            }
 
-                // Obtener siguiente registro
-                $resultadoRegistro = $procesador->obtenerSiguienteRegistro($tabla);
-
-                if (!$resultadoRegistro['success']) {
-                    $mensaje = "Error en tabla {$tabla}: " . $resultadoRegistro['error'];
-                    LogService::append(['type' => 'error', 'message' => $mensaje]);
-                    continue;
-                }
-
-                if ($resultadoRegistro['registro'] === null) {
-                    $mensaje = "No hay más registros en {$tabla}";
-                    LogService::append(['type' => 'info', 'message' => $mensaje]);
-                    continue;
-                }
-                
-                $registro = $resultadoRegistro['registro'];
-                $registroProcesado = true;
-
-                // Capturar el índice (primary key) del registro procesado
-                try {
-                    $primaryKey = \App\Services\ConfigService::obtenerRequerido('PRIMARY_KEY');
-                    if (isset($registro[$primaryKey])) {
-                        $registroId = is_numeric($registro[$primaryKey]) ? (int)$registro[$primaryKey] : $registro[$primaryKey];
-                    }
-                } catch (\Exception $e) {
-                    // Silencioso: no romper por falta de config
-                    $registroId = null;
-                }
-                
-                // Materializar imágenes
-                $resultadosImagenes = $materializador->materializarImagenesRegistro(
-                    $registro,
-                    $columnasImagen,
-                    $campoIdentificador,
-                    $campoUsrId,
-                    $campoFecha,
-                    $campoResultado
-                );
-                
-                $erroresImagenes = [];
-                $rutasGuardadas = [];
-                $rawMd5PorRuta = [];
-                foreach ($resultadosImagenes as $columna => $resultadoImg) {
-                    if (!empty($resultadoImg['duplicate'])) {
-                        $totalDuplicadas++;
-                        $duplicadasCols[] = (string)$columna;
+            $procesadosEnPeticion = 0;
+            while ($procesadosEnPeticion < $limiteRegistros) {
+                $avanzado = false;
+                foreach ($tablasDelEstado as $tabla) {
+                    if (!$estadoTracker->faltanRegistros($tabla)) {
                         continue;
                     }
-                    if (($resultadoImg['success'] ?? false) === true) {
-                        if (!empty($resultadoImg['ruta'])) {
-                            $totalImagenes++;
-                            $rutasGuardadas[] = $resultadoImg['ruta'];
-                            if (!empty($resultadoImg['raw_md5'])) {
-                                $rawMd5PorRuta[$resultadoImg['ruta']] = $resultadoImg['raw_md5'];
-                            }
-                        }
-                    } else {
-                        $erroresImagenes[] = $columna . ': ' . ($resultadoImg['error'] ?? 'Error desconocido');
-                    }
-                }
+                    $tablaProcesada = $tabla;
+                    LogService::append([
+                        'type' => 'info',
+                        'message' => 'Procesando tabla: ' . $tabla,
+                    ]);
 
-                // Actualizar índice de imágenes/estadísticas sin reindexación completa
-                $clasificacionStats = null;
-                if (!empty($rutasGuardadas)) {
+                    $resultadoRegistro = $procesador->obtenerSiguienteRegistro($tabla);
+
+                    if (!$resultadoRegistro['success']) {
+                        $mensaje = "Error en tabla {$tabla}: " . $resultadoRegistro['error'];
+                        LogService::append(['type' => 'error', 'message' => $mensaje]);
+                        continue;
+                    }
+
+                    if ($resultadoRegistro['registro'] === null) {
+                        $mensaje = "No hay más registros en {$tabla}";
+                        LogService::append(['type' => 'info', 'message' => $mensaje]);
+                        continue;
+                    }
+
+                    $registro = $resultadoRegistro['registro'];
+                    $registroProcesado = true;
+                    $avanzado = true;
+
                     try {
-                        $imagenesIndex = new ImagenesIndex();
-                        $directorioBase = ImagenesIndex::resolverDirectorioBaseImagenes();
-                        $imagenesIndex->upsertDesdeRutas($rutasGuardadas, $directorioBase);
-                        // Persistir raw_md5 en el índice para dedupe futuro (imagen tal cual viene de la BD)
-                        if (!empty($rawMd5PorRuta)) {
-                            $pdo = \App\Services\AppConnection::get();
-                            \App\Services\AppSchema::ensure($pdo);
-                            $tImg = \App\Services\AppConnection::table('images');
-                            $ws = \App\Services\AppConnection::currentSlug() ?? 'default';
-                            $driver = \App\Services\AppConnection::getCurrentDriver();
-                            $baseNorm = str_replace('\\', '/', rtrim(realpath($directorioBase) ?: $directorioBase, "/\\"));
-                            $stmtRaw = $pdo->prepare("UPDATE {$tImg} SET raw_md5 = :raw WHERE workspace_slug = :ws AND ruta_relativa = :rel");
-                            foreach ($rawMd5PorRuta as $rutaCompleta => $rawMd5) {
-                                $rutaNorm = str_replace('\\', '/', $rutaCompleta);
-                                $rel = (strpos($rutaNorm, $baseNorm . '/') === 0)
-                                    ? substr($rutaNorm, strlen($baseNorm) + 1)
-                                    : $rutaNorm;
-                                $rel = ltrim(preg_replace('#/+#', '/', $rel), '/');
-                                if ($rel !== '') {
-                                    $stmtRaw->execute([':raw' => $rawMd5, ':ws' => $ws, ':rel' => $rel]);
+                        $primaryKey = \App\Services\ConfigService::obtenerRequerido('PRIMARY_KEY');
+                        $registroId = isset($registro[$primaryKey]) ? (is_numeric($registro[$primaryKey]) ? (int)$registro[$primaryKey] : $registro[$primaryKey]) : null;
+                    } catch (\Exception $e) {
+                        $registroId = null;
+                    }
+
+                    $resultadosImagenes = $materializador->materializarImagenesRegistro(
+                        $registro,
+                        $columnasImagen,
+                        $campoIdentificador,
+                        $campoUsrId,
+                        $campoFecha,
+                        $campoResultado
+                    );
+
+                    $erroresImagenes = [];
+                    $rutasGuardadas = [];
+                    $rawMd5PorRuta = [];
+                    foreach ($resultadosImagenes as $columna => $resultadoImg) {
+                        if (!empty($resultadoImg['duplicate'])) {
+                            $totalDuplicadas++;
+                            $duplicadasCols[] = (string)$columna;
+                            continue;
+                        }
+                        if (($resultadoImg['success'] ?? false) === true) {
+                            if (!empty($resultadoImg['ruta'])) {
+                                $totalImagenes++;
+                                $rutasGuardadas[] = $resultadoImg['ruta'];
+                                if (!empty($resultadoImg['raw_md5'])) {
+                                    $rawMd5PorRuta[$resultadoImg['ruta']] = $resultadoImg['raw_md5'];
                                 }
                             }
+                        } else {
+                            $erroresImagenes[] = $columna . ': ' . ($resultadoImg['error'] ?? 'Error desconocido');
                         }
-                        $clasificacionStats = $imagenesIndex->getStats(true);
-                    } catch (\Exception $e) {
-                        // Silencioso: no romper descarga por fallo de índice
-                        $clasificacionStats = null;
+                    }
+
+                    if (!empty($rutasGuardadas)) {
+                        try {
+                            $imagenesIndex = new ImagenesIndex();
+                            $directorioBase = ImagenesIndex::resolverDirectorioBaseImagenes();
+                            $imagenesIndex->upsertDesdeRutas($rutasGuardadas, $directorioBase, $rawMd5PorRuta);
+                            $clasificacionStats = $imagenesIndex->getStats(true);
+                        } catch (\Exception $e) {
+                            $clasificacionStats = null;
+                        }
+                    }
+
+                    $valorId = ($registroId !== null) ? (string) $registroId : '';
+                    if ($resultadoRegistro['faltan_registros']) {
+                        $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Aún faltan registros." : "Registro procesado de {$tabla}. Aún faltan registros.";
+                    } else {
+                        $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Tabla completada." : "Registro procesado de {$tabla}. Tabla completada.";
+                    }
+                    if (!empty($erroresImagenes)) {
+                        $mensaje .= " Errores en imágenes: " . implode(', ', $erroresImagenes);
+                    }
+                    if ($totalDuplicadas > 0) {
+                        $mensaje .= " Duplicadas omitidas: {$totalDuplicadas}.";
+                    }
+                    LogService::append([
+                        'type' => $totalImagenes > 0 ? 'success' : 'info',
+                        'message' => $mensaje,
+                    ]);
+
+                    $procesadosEnPeticion++;
+                    $estadoTracker->recargarEstado();
+                    if ($procesadosEnPeticion >= $limiteRegistros) {
+                        break 2;
                     }
                 }
-                
-                $valorId = ($registroId !== null) ? (string) $registroId : '';
-                if ($resultadoRegistro['faltan_registros']) {
-                    $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Aún faltan registros." : "Registro procesado de {$tabla}. Aún faltan registros.";
-                } else {
-                    $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Tabla completada." : "Registro procesado de {$tabla}. Tabla completada.";
+                if (!$avanzado) {
+                    break;
                 }
-                
-                if (!empty($erroresImagenes)) {
-                    $mensaje .= " Errores en imágenes: " . implode(', ', $erroresImagenes);
-                }
-                if ($totalDuplicadas > 0) {
-                    $mensaje .= " Duplicadas omitidas: {$totalDuplicadas}.";
-                }
-                LogService::append([
-                    'type' => $totalImagenes > 0 ? 'success' : 'info',
-                    'message' => $mensaje,
-                ]);
-                break;
             }
             
             // Recargar estado desde el archivo (el ProcesadorTablas ya lo actualizó y guardó)
