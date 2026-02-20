@@ -138,9 +138,13 @@ class CarpetasController extends BaseController
         $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $rutaToCarpeta = [];
         $rutaRelativas = [];
+        $totalByRuta = [];
         foreach ($imgRows as $r) {
             $rrel = (string)($r['ruta_relativa'] ?? '');
             $rc = (string)($r['ruta_carpeta'] ?? '');
+            if ($rc !== '') {
+                $totalByRuta[$rc] = ($totalByRuta[$rc] ?? 0) + 1;
+            }
             if ($rrel !== '') {
                 $rutaToCarpeta[$rrel] = $rc;
                 $rutaRelativas[] = $rrel;
@@ -219,6 +223,13 @@ class CarpetasController extends BaseController
             $tagsList = array_slice($tagsList, 0, 12);
 
             $c['pendientes'] = (int)($pendByRuta[$ruta] ?? 0);
+            $totalReal = (int)($totalByRuta[$ruta] ?? $c['total_archivos'] ?? $c['total_imagenes'] ?? 0);
+            if (array_key_exists('total_archivos', $c)) {
+                $c['total_archivos'] = $totalReal;
+            }
+            if (array_key_exists('total_imagenes', $c)) {
+                $c['total_imagenes'] = $totalReal;
+            }
             $c['tags'] = $tagsList;
             $out[] = $c;
         }
@@ -499,6 +510,12 @@ class CarpetasController extends BaseController
     public function ver()
     {
         try {
+            if (isset($_GET['workspace']) && trim((string)$_GET['workspace']) !== '') {
+                $reqWs = WorkspaceService::slugify(trim((string)$_GET['workspace']));
+                if ($reqWs !== '' && WorkspaceService::isValidSlug($reqWs) && WorkspaceService::exists($reqWs)) {
+                    WorkspaceService::setCurrent($reqWs);
+                }
+            }
             $ws = WorkspaceService::current();
             if ($ws === null) {
                 $this->jsonResponse(['success' => false, 'error' => 'No hay workspace activo'], 409);
@@ -754,6 +771,14 @@ class CarpetasController extends BaseController
                         $lockFp = null;
                     }
                 };
+
+                // HEAD sin caché: no generar; solo GET genera el thumb
+                if ($isHead) {
+                    $releaseLock();
+                    header('HTTP/1.1 204 No Content');
+                    header('Access-Control-Expose-Headers: X-Thumb-New, X-Thumb-Cached');
+                    return;
+                }
 
                 // Generar thumb (si GD no está disponible, devolver original como fallback)
                 if (!function_exists('imagecreatetruecolor') || !function_exists('imagecopyresampled')) {

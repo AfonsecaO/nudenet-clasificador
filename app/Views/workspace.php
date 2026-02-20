@@ -46,7 +46,7 @@ function fmtTs($ts): string {
         </button>
       </div>
     <?php else: ?>
-    <div class="row ws-layout">
+    <div class="row ws-layout ws-layout--buscador-collapsed">
       <div class="col-lg-8 col-md-12 ws-grid-wrap">
     <div class="ws-grid">
       <?php foreach ($workspaces as $ws): ?>
@@ -120,9 +120,15 @@ function fmtTs($ts): string {
     </div>
     <div class="ws-grid-spacer" aria-hidden="true"></div>
       </div>
-      <div class="col-lg-4 col-md-12 ws-search-col mb-3 mb-lg-0">
+      <div class="col-lg-4 col-md-12 ws-search-col ws-search-col--collapsed mb-3 mb-lg-0" id="wsSearchCol">
         <div class="ws-search-consolidado" id="wsSearchConsolidado">
-          <h2 class="ws-search-consolidado-title"><i class="fas fa-search"></i> Buscar en todos los workspaces</h2>
+          <div class="ws-search-consolidado-header">
+            <button type="button" class="ws-search-toggle btn btn-sm btn-outline-secondary" id="wsSearchToggle" aria-expanded="false" aria-label="Expandir buscador" title="Expandir buscador">
+              <i class="fas fa-chevron-right" aria-hidden="true"></i>
+            </button>
+            <h2 class="ws-search-consolidado-title"><i class="fas fa-search"></i> Buscar en todos los workspaces</h2>
+          </div>
+          <div class="ws-search-consolidado-body">
           <?php
           $buscador = [
             'suffix' => 'Global',
@@ -134,6 +140,7 @@ function fmtTs($ts): string {
           ];
           include __DIR__ . '/partials/buscador-acordeon.php';
           ?>
+          </div>
         </div>
       </div>
     </div>
@@ -508,6 +515,10 @@ function fmtTs($ts): string {
     if (!data || !ws) return;
     const type = mode === 'download' ? 'descargar' : 'clasificar';
     if (mode === 'download') {
+      if (typeof data.pendientes === 'number') {
+        const registrosEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="registros-descarga"]');
+        if (registrosEl) registrosEl.textContent = Number(data.pendientes).toLocaleString();
+      }
       const stats = data?.clasificacion_stats;
       const imagenes = stats && (typeof stats.total === 'number') ? stats.total : null;
       const metricsText = formatMetrics(type, null, { imagenes_totales: imagenes ?? 0 });
@@ -1019,6 +1030,34 @@ function fmtTs($ts): string {
     });
 
     loadEtiquetasGlobal();
+  }
+
+  // Toggle colapso del buscador (derecha)
+  const STORAGE_KEY_BUSCADOR = 'photoClassifier.buscadorCollapsed';
+  const wsSearchCol = document.getElementById('wsSearchCol');
+  const wsSearchToggle = document.getElementById('wsSearchToggle');
+  const wsLayout = document.querySelector('.ws-layout');
+  if (wsSearchCol && wsSearchToggle) {
+    function setBuscadorCollapsed(collapsed) {
+      const isCollapsed = !!collapsed;
+      wsSearchCol.classList.toggle('ws-search-col--collapsed', isCollapsed);
+      if (wsLayout) wsLayout.classList.toggle('ws-layout--buscador-collapsed', isCollapsed);
+      wsSearchToggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+      wsSearchToggle.setAttribute('aria-label', isCollapsed ? 'Expandir buscador' : 'Colapsar buscador');
+      wsSearchToggle.setAttribute('title', isCollapsed ? 'Expandir buscador' : 'Colapsar buscador');
+      try { localStorage.setItem(STORAGE_KEY_BUSCADOR, isCollapsed ? '1' : '0'); } catch (e) {}
+    }
+    wsSearchToggle.addEventListener('click', function () {
+      setBuscadorCollapsed(wsSearchCol.classList.contains('ws-search-col--collapsed') ? false : true);
+    });
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_BUSCADOR);
+      // Por defecto colapsado; solo expandir si el usuario lo dejó abierto (saved === '0')
+      if (saved === '0') setBuscadorCollapsed(false);
+      else setBuscadorCollapsed(true);
+    } catch (e) {
+      setBuscadorCollapsed(true);
+    }
   }
 </script>
 

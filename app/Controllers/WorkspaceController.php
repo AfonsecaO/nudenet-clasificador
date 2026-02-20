@@ -312,6 +312,12 @@ class WorkspaceController extends BaseController
 
             if ($out['mode'] === 'db_and_images') {
                 $tTablesState = AppConnection::table('tables_state');
+                $repair = $pdo->prepare("
+                    UPDATE {$tTablesState}
+                    SET ultimo_id = max_id
+                    WHERE workspace_slug = :ws AND (COALESCE(faltan_registros, 1) = 0) AND ultimo_id < max_id
+                ");
+                $repair->execute([':ws' => $slug]);
                 $st = $pdo->prepare("SELECT ultimo_id, max_id FROM {$tTablesState} WHERE workspace_slug = :ws");
                 $st->execute([':ws' => $slug]);
                 $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -319,7 +325,7 @@ class WorkspaceController extends BaseController
                 foreach ($rows as $r) {
                     $maxId = (int)($r['max_id'] ?? 0);
                     $ultimoId = (int)($r['ultimo_id'] ?? 0);
-                    $sumPendientes += max(0, $maxId - $ultimoId + 1);
+                    $sumPendientes += max(0, $maxId - $ultimoId);
                 }
                 $out['registros_pendientes_descarga'] = $sumPendientes;
             }
@@ -371,16 +377,56 @@ class WorkspaceController extends BaseController
                         ");
                         $stmt->bindValue(':ws', $slug, PDO::PARAM_STR);
                         $stmt->bindValue(':q', '%' . $searchKey . '%', PDO::PARAM_STR);
-                        $stmt->bindValue(':lim', self::LIMIT_CARPETAS_POR_WS, PDO::PARAM_INT);
+                        $stmt->bindValue(':lim', self::LIMIT_CARPETAS_POR_WS * 2, PDO::PARAM_INT);
                         $stmt->execute();
                         $rows = $stmt->fetchAll() ?: [];
+                        $rutaNorm = trim(str_replace('\\', '/', $q), '/');
+                        $singleSegment = ($rutaNorm !== '' && strpos($rutaNorm, '/') === false);
+                        if ($singleSegment && count($rows) > 1) {
+                            $exact = [];
+                            $prefixMatch = [];
+                            $prefix = $rutaNorm . '/';
+                            foreach ($rows as $r) {
+                                $rc = trim(str_replace('\\', '/', (string)($r['ruta'] ?? '')), '/');
+                                if ($rc === $rutaNorm) {
+                                    $exact[] = $r;
+                                } elseif (strpos($rc, $prefix) === 0 || basename($rc) === $rutaNorm) {
+                                    $prefixMatch[] = $r;
+                                }
+                            }
+                            if (count($exact) > 0) {
+                                $rows = $exact;
+                            } elseif (count($prefixMatch) > 0) {
+                                usort($prefixMatch, function ($a, $b) {
+                                    $na = (int)($a['total_imagenes'] ?? 0);
+                                    $nb = (int)($b['total_imagenes'] ?? 0);
+                                    return $nb <=> $na;
+                                });
+                                $rows = [ $prefixMatch[0] ];
+                            } else {
+                                $rows = [ $rows[0] ];
+                            }
+                        }
+                        $rows = array_slice($rows, 0, self::LIMIT_CARPETAS_POR_WS);
                     }
                     $rutas = array_column($rows, 'ruta');
                     $rutas = array_values(array_unique(array_filter($rutas, fn($v) => $v !== '')));
                     $pendByRuta = [];
+                    $totalByRuta = [];
                     $tagsByRuta = [];
                     if ($rows && !empty($rutas)) {
                         $ph = implode(',', array_fill(0, count($rutas), '?'));
+                        $stmtTotal = $pdo->prepare("
+                            SELECT i.ruta_carpeta as ruta, COUNT(*) as c
+                            FROM {$tImages} i
+                            WHERE i.workspace_slug = ? AND i.ruta_carpeta IN ($ph)
+                            GROUP BY i.ruta_carpeta
+                        ");
+                        $stmtTotal->execute(array_merge([$slug], $rutas));
+                        foreach ($stmtTotal->fetchAll() ?: [] as $row) {
+                            $rutaP = (string)($row['ruta'] ?? '');
+                            if ($rutaP !== '') $totalByRuta[$rutaP] = (int)($row['c'] ?? 0);
+                        }
                         $stmtPend = $pdo->prepare("
                             SELECT i.ruta_carpeta as ruta, COUNT(*) as c
                             FROM {$tImages} i
@@ -454,10 +500,11 @@ class WorkspaceController extends BaseController
                         }
                         usort($tagsList, fn($a, $b) => ($b['count'] <=> $a['count']) ?: strcmp((string)($a['label'] ?? ''), (string)($b['label'] ?? '')));
                         $tagsList = array_slice($tagsList, 0, 12);
+                        $totalReal = (int)($totalByRuta[$ruta] ?? $r['total_imagenes'] ?? 0);
                         $batch[] = [
                             'nombre' => $nombre !== '' ? $nombre : $ruta,
                             'ruta' => $ruta,
-                            'total_archivos' => (int)($r['total_imagenes'] ?? 0),
+                            'total_archivos' => $totalReal,
                             'pendientes' => (int)($pendByRuta[$ruta] ?? 0),
                             'workspace' => $slug,
                             'tags' => $tagsList,
@@ -473,6 +520,37 @@ class WorkspaceController extends BaseController
                     }
                 } catch (\Throwable $e) {
                     // omitir workspace
+                }
+            }
+
+            $rutaNorm = trim(str_replace('\\', '/', $q), '/');
+            $singleSegment = ($rutaNorm !== '' && strpos($rutaNorm, '/') === false && strpos($q, ' ') === false);
+            if ($singleSegment && count($carpetas) > 0) {
+                $byWs = [];
+                foreach ($carpetas as $c) {
+                    $ws = (string)($c['workspace'] ?? '');
+                    if (!isset($byWs[$ws])) {
+                        $byWs[$ws] = [];
+                    }
+                    $byWs[$ws][] = $c;
+                }
+                $carpetas = [];
+                foreach ($byWs as $ws => $list) {
+                    $elegida = null;
+                    foreach ($list as $c) {
+                        $r = trim(str_replace('\\', '/', (string)($c['ruta'] ?? '')), '/');
+                        if ($r === $rutaNorm) {
+                            $elegida = $c;
+                            break;
+                        }
+                    }
+                    if ($elegida === null && count($list) > 0) {
+                        usort($list, fn($a, $b) => ($b['total_archivos'] <=> $a['total_archivos']) ?: strcmp((string)($a['ruta'] ?? ''), (string)($b['ruta'] ?? '')));
+                        $elegida = $list[0];
+                    }
+                    if ($elegida !== null) {
+                        $carpetas[] = $elegida;
+                    }
                 }
             }
 

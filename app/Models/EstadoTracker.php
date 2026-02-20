@@ -226,6 +226,24 @@ class EstadoTracker
     }
 
     /**
+     * Repara tablas marcadas como completadas (faltan_registros=0) que tengan ultimo_id < max_id.
+     * Asigna ultimo_id = max_id para que el contador y la vista muestren valores coherentes.
+     */
+    public function repararUltimoIdEnCompletadas(): void
+    {
+        $ws = $this->ws();
+        if ($ws === '') {
+            return;
+        }
+        $upd = $this->pdo->prepare("
+            UPDATE " . $this->tTablesState . "
+            SET ultimo_id = max_id
+            WHERE workspace_slug = :ws AND (COALESCE(faltan_registros, 1) = 0) AND ultimo_id < max_id
+        ");
+        $upd->execute([':ws' => $ws]);
+    }
+
+    /**
      * Inicializa el estado para una tabla si no existe
      */
     public function inicializarTabla($tabla)

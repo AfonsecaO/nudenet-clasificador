@@ -80,5 +80,33 @@ class TablasLiveService
             'pattern' => $resultadoBusqueda['pattern'] ?? null
         ];
     }
+
+    /**
+     * Actualiza solo el max_id de una tabla consultando la BD origen.
+     * Útil cuando una tabla tiene max_id=0 pero ya tiene registros (p. ej. se añadió después del refresh).
+     */
+    public static function refrescarMaxIdDeTabla(string $tabla): void
+    {
+        if (ConfigService::getWorkspaceMode() !== 'db_and_images') {
+            return;
+        }
+        try {
+            $database = new Database();
+            if (!$database->tablaExiste($tabla)) {
+                return;
+            }
+            $primaryKey = ConfigService::obtenerRequerido('PRIMARY_KEY');
+            $conn = $database->getConnection();
+            $sql = "SELECT MAX(`{$primaryKey}`) as max_id FROM `{$tabla}`";
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            $maxId = ($row && isset($row['max_id']) && $row['max_id'] !== null) ? (int)$row['max_id'] : 0;
+            $estadoTracker = new EstadoTracker();
+            $estadoTracker->actualizarMaxId($tabla, $maxId);
+        } catch (\Throwable $e) {
+            // silencioso
+        }
+    }
 }
 

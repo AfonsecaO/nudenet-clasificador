@@ -80,6 +80,10 @@ class ProcesadorTablas
     {
         try {
             $this->estadoTracker->inicializarTabla($tabla);
+            $maxIdOrigen = $this->obtenerMaxIdDesdeOrigen($tabla);
+            if ($maxIdOrigen !== null) {
+                $this->estadoTracker->actualizarMaxId($tabla, $maxIdOrigen);
+            }
             $ultimoId = $this->estadoTracker->getUltimoId($tabla);
 
             $columnasStr = implode(', ', array_map(function($col) {
@@ -106,11 +110,19 @@ class ProcesadorTablas
                     'faltan_registros' => $this->estadoTracker->faltanRegistros($tabla)
                 ];
             }
-            $this->estadoTracker->actualizarUltimoId($tabla, $ultimoId, false);
+            $maxIdActual = $this->obtenerMaxIdDesdeOrigen($tabla);
+            if ($maxIdActual !== null) {
+                $this->estadoTracker->actualizarMaxId($tabla, $maxIdActual);
+            }
+            $estado = $this->estadoTracker->getEstado();
+            $maxId = (int)($estado[$tabla]['max_id'] ?? 0);
+            $faltan = ($maxId > $ultimoId);
+            $idParaCompletar = ($maxId > 0) ? $maxId : $ultimoId;
+            $this->estadoTracker->actualizarUltimoId($tabla, $idParaCompletar, $faltan);
             return [
                 'success' => true,
                 'registro' => null,
-                'faltan_registros' => false
+                'faltan_registros' => $faltan
             ];
         } catch (PDOException $e) {
             return [
@@ -119,6 +131,30 @@ class ProcesadorTablas
                 'registro' => null,
                 'faltan_registros' => false
             ];
+        }
+    }
+
+    /**
+     * Consulta el MAX(id) actual en la BD origen para una tabla.
+     * Devuelve null si no se puede obtener (tabla no existe o error).
+     */
+    private function obtenerMaxIdDesdeOrigen(string $tabla): ?int
+    {
+        if (!$this->database->tablaExiste($tabla)) {
+            return null;
+        }
+        try {
+            $conn = $this->database->getConnection();
+            $sql = "SELECT MAX(`{$this->primaryKey}`) as max_id FROM `{$tabla}`";
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if ($row && isset($row['max_id']) && $row['max_id'] !== null) {
+                return (int) $row['max_id'];
+            }
+            return 0;
+        } catch (\Throwable $e) {
+            return null;
         }
     }
 

@@ -30,6 +30,13 @@ class HomeController extends BaseController
             }
 
             $estadoTracker = new EstadoTracker();
+            $estadoTracker->repararUltimoIdEnCompletadas();
+            $estadoProcesamiento = $estadoTracker->getEstado();
+            foreach (array_keys($estadoProcesamiento) as $tabla) {
+                if (((int)($estadoProcesamiento[$tabla]['max_id'] ?? 0)) === 0) {
+                    TablasLiveService::refrescarMaxIdDeTabla($tabla);
+                }
+            }
             $estadoProcesamiento = $estadoTracker->getEstado();
             
             // Si hay estado guardado, extraer las tablas para mostrarlas
