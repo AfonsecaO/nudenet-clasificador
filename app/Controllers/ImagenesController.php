@@ -370,8 +370,8 @@ class ImagenesController extends BaseController
             $pendientesTotal = $pendientesClas + $pendientesDet;
 
             $rutaRel = $record['ruta_relativa'] ?? $key;
-            $logMsg = 'Procesada: ' . $rutaRel . ' · resultado: ' . ($resultado ?? '');
-            if (($resultado === 'unsafe') && !empty($detecciones)) {
+            $tagsPart = '';
+            if (!empty($detecciones)) {
                 $ordenadas = $detecciones;
                 usort($ordenadas, fn($a, $b) => (float)($b['score'] ?? 0) <=> (float)($a['score'] ?? 0));
                 $tagsConPct = [];
@@ -381,10 +381,9 @@ class ImagenesController extends BaseController
                     $pct = (int)round(((float)($d['score'] ?? 0)) * 100);
                     $tagsConPct[] = $lab . ' ' . $pct . '%';
                 }
-                if (!empty($tagsConPct)) {
-                    $logMsg .= ' · etiquetas: ' . implode(', ', $tagsConPct);
-                }
+                $tagsPart = implode(', ', $tagsConPct);
             }
+            $logMsg = $rutaRel . ' | ' . ($tagsPart !== '' ? $tagsPart : 'sin etiquetas');
             LogService::append([
                 'type' => 'info',
                 'message' => $logMsg,

@@ -11,6 +11,11 @@ class ImageCompressor
     private const DEFAULT_JPEG_QUALITY = 85;
     private const DEFAULT_PNG_COMPRESSION_LEVEL = 8;
 
+    /** @var int|null Cache de calidad JPEG por request */
+    private static ?int $cachedJpegQuality = null;
+    /** @var int|null Cache de nivel PNG por request */
+    private static ?int $cachedPngLevel = null;
+
     /**
      * Comprime el binario de una imagen según su extensión.
      *
@@ -52,15 +57,18 @@ class ImageCompressor
      */
     private static function compressJpeg(string $binary): ?string
     {
-        $quality = self::DEFAULT_JPEG_QUALITY;
-        try {
-            $q = ConfigService::obtenerOpcional('IMAGE_JPEG_QUALITY', (string) $quality);
-            if ($q !== null && $q !== '') {
-                $quality = max(1, min(100, (int) $q));
+        if (self::$cachedJpegQuality === null) {
+            self::$cachedJpegQuality = self::DEFAULT_JPEG_QUALITY;
+            try {
+                $q = ConfigService::obtenerOpcional('IMAGE_JPEG_QUALITY', (string) self::DEFAULT_JPEG_QUALITY);
+                if ($q !== null && $q !== '') {
+                    self::$cachedJpegQuality = max(1, min(100, (int) $q));
+                }
+            } catch (\Throwable $e) {
+                // usar default
             }
-        } catch (\Throwable $e) {
-            // usar default
         }
+        $quality = self::$cachedJpegQuality;
 
         if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
             $img = @imagecreatefromstring($binary);
@@ -105,15 +113,18 @@ class ImageCompressor
      */
     private static function compressPng(string $binary): ?string
     {
-        $level = self::DEFAULT_PNG_COMPRESSION_LEVEL; // 0-9, 9 máximo
-        try {
-            $l = ConfigService::obtenerOpcional('IMAGE_PNG_COMPRESSION', (string) $level);
-            if ($l !== null && $l !== '') {
-                $level = max(0, min(9, (int) $l));
+        if (self::$cachedPngLevel === null) {
+            self::$cachedPngLevel = self::DEFAULT_PNG_COMPRESSION_LEVEL;
+            try {
+                $l = ConfigService::obtenerOpcional('IMAGE_PNG_COMPRESSION', (string) self::DEFAULT_PNG_COMPRESSION_LEVEL);
+                if ($l !== null && $l !== '') {
+                    self::$cachedPngLevel = max(0, min(9, (int) $l));
+                }
+            } catch (\Throwable $e) {
+                // usar default
             }
-        } catch (\Throwable $e) {
-            // usar default
         }
+        $level = self::$cachedPngLevel;
 
         if (function_exists('imagecreatefromstring') && function_exists('imagepng')) {
             $img = @imagecreatefromstring($binary);
@@ -151,5 +162,14 @@ class ImageCompressor
         }
 
         return null;
+    }
+
+    /**
+     * Resetea el cache de configuración (útil en tests).
+     */
+    public static function resetConfigCache(): void
+    {
+        self::$cachedJpegQuality = null;
+        self::$cachedPngLevel = null;
     }
 }

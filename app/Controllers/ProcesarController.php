@@ -102,11 +102,6 @@ class ProcesarController extends BaseController
                         continue;
                     }
                     $tablaProcesada = $tabla;
-                    LogService::append([
-                        'type' => 'info',
-                        'message' => 'Procesando tabla: ' . $tabla,
-                    ]);
-
                     $resultadoRegistro = $procesador->obtenerSiguienteRegistro($tabla);
 
                     if (!$resultadoRegistro['success']) {
@@ -174,20 +169,14 @@ class ProcesarController extends BaseController
                         }
                     }
 
-                    $valorId = ($registroId !== null) ? (string) $registroId : '';
-                    if ($resultadoRegistro['faltan_registros']) {
-                        $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Aún faltan registros." : "Registro procesado de {$tabla}. Aún faltan registros.";
-                    } else {
-                        $mensaje = $valorId !== '' ? "Registro procesado de {$tabla} (id: {$valorId}). Tabla completada." : "Registro procesado de {$tabla}. Tabla completada.";
-                    }
-                    if (!empty($erroresImagenes)) {
-                        $mensaje .= " Errores en imágenes: " . implode(', ', $erroresImagenes);
-                    }
-                    if ($totalDuplicadas > 0) {
-                        $mensaje .= " Duplicadas omitidas: {$totalDuplicadas}.";
+                    $valorId = ($registroId !== null) ? (string) $registroId : '—';
+                    $countErrores = count($erroresImagenes);
+                    $mensaje = $tabla . ' | ID:' . $valorId . ' | M:' . $totalImagenes . ' | E:' . $countErrores;
+                    if (!$resultadoRegistro['faltan_registros']) {
+                        $mensaje .= ' (tabla completada)';
                     }
                     LogService::append([
-                        'type' => $totalImagenes > 0 ? 'success' : 'info',
+                        'type' => $totalImagenes > 0 ? 'success' : ($countErrores > 0 ? 'warning' : 'info'),
                         'message' => $mensaje,
                     ]);
 
