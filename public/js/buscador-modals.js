@@ -78,44 +78,60 @@
   }
 
   /**
-   * Carga el thumb con caché (sin cache-buster). Si el servidor acaba de crear el thumb
-   * (X-Thumb-New: 1), muestra el badge "New". HEAD se hace primero para que el badge se
-   * decida antes de cargar la imagen (si hacemos img.src antes, el GET puede generar el thumb
-   * y el HEAD luego recibe X-Thumb-Cached y no se muestra el badge).
+   * Carga el thumb con una sola petición GET. Permite caché del navegador (cache: 'default').
+   * Si el servidor acaba de generar el thumb (X-Thumb-New: 1 y no X-Thumb-Cached), muestra el badge "New".
+   * onDone (opcional) se llama cuando termina la carga (éxito, 204 o error).
    */
-  function loadThumbWithNewBadge(img, thumbUrl, card) {
+  function loadThumbWithNewBadge(img, thumbUrl, card, onDone) {
     if (!img || !thumbUrl) {
       removeThumbLoader(card);
+      if (typeof onDone === 'function') onDone();
       return;
     }
-    removeThumbLoader(card);
     img.loading = 'eager';
-
-    function setImageSrc() {
-      img.src = thumbUrl;
-    }
 
     var retries = 0;
     var maxRetries = 3;
-    img.onerror = function () {
-      img.onerror = null;
-      if (retries < maxRetries) {
-        retries++;
-        var delay = retries === 1 ? 200 : (retries === 2 ? 500 : 900);
-        setTimeout(setImageSrc, delay);
-      }
-    };
 
-    fetch(thumbUrl, { method: 'HEAD', cache: 'no-store' })
-      .then(function (r) {
-        if (r.headers.get('X-Thumb-New') === '1' && r.headers.get('X-Thumb-Cached') !== '1') {
-          addNewBadgeToCard(card);
-        }
-        setImageSrc();
-      })
-      .catch(function () {
-        setImageSrc();
-      });
+    function finish() {
+      if (typeof onDone === 'function') onDone();
+    }
+
+    function doFetch() {
+      fetch(thumbUrl, { cache: 'default', method: 'GET' })
+        .then(function (r) {
+          if (r.status === 204) {
+            removeThumbLoader(card);
+            img.src = thumbUrl;
+            finish();
+            return null;
+          }
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          if (r.headers.get('X-Thumb-New') === '1' && r.headers.get('X-Thumb-Cached') !== '1') {
+            addNewBadgeToCard(card);
+          }
+          return r.blob();
+        })
+        .then(function (blob) {
+          if (!blob) return;
+          removeThumbLoader(card);
+          img.src = URL.createObjectURL(blob);
+          finish();
+        })
+        .catch(function () {
+          if (retries < maxRetries) {
+            retries++;
+            var delay = retries === 1 ? 200 : (retries === 2 ? 500 : 900);
+            setTimeout(doFetch, delay);
+          } else {
+            removeThumbLoader(card);
+            img.src = thumbUrl;
+            finish();
+          }
+        });
+    }
+
+    doFetch();
   }
 
   var THUMB_SCROLL_DELAY_MS = 120;
@@ -124,18 +140,29 @@
   var thumbDebounceViewport = { queue: [], timer: null };
   var thumbDebounceByRoot = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
 
-  var THUMB_STAGGER_MS = 60;
+  var THUMB_MAX_CONCURRENT = 4;
+  var thumbConcurrency = { inFlight: 0, queue: [] };
+
+  function runNextThumbLoad() {
+    while (thumbConcurrency.inFlight < THUMB_MAX_CONCURRENT && thumbConcurrency.queue.length) {
+      var item = thumbConcurrency.queue.shift();
+      if (!item || !item.img || !item.url) continue;
+      thumbConcurrency.inFlight++;
+      loadThumbWithNewBadge(item.img, item.url, item.card, function onDone() {
+        thumbConcurrency.inFlight--;
+        runNextThumbLoad();
+      });
+    }
+  }
+
   function flushThumbQueue(state) {
     if (!state || !state.queue.length) return;
     var list = state.queue;
     state.queue = [];
     for (var i = 0; i < list.length; i++) {
-      (function (item, index) {
-        setTimeout(function () {
-          if (item.card && item.img && item.url) loadThumbWithNewBadge(item.img, item.url, item.card);
-        }, index * THUMB_STAGGER_MS);
-      })(list[i], i);
+      thumbConcurrency.queue.push({ card: list[i].card, img: list[i].img, url: list[i].url });
     }
+    runNextThumbLoad();
   }
 
   function getThumbObserver(root) {

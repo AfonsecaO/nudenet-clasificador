@@ -34,8 +34,10 @@ async function fetchJson(url) {
 async function runDownloadLoop(ws) {
   while (!stopRequested && downloadSet.has(ws)) {
     const url = buildUrl('procesar', ws);
+    const t0 = Date.now();
     const { ok, data } = await fetchJson(url);
-    self.postMessage({ type: 'tick', mode: 'download', ws, ok, data });
+    const durationMs = Date.now() - t0;
+    self.postMessage({ type: 'tick', mode: 'download', ws, ok, data, durationMs });
     if (!ok || !data?.success) break;
     // Solo terminar cuando no se procesó registro Y ya no faltan registros (id <= max_id); si hay huecos, registro_procesado puede ser false pero faltan_registros true
     const noMoreWork = data?.registro_procesado === false && !data?.faltan_registros;
@@ -51,8 +53,10 @@ async function runDownloadLoop(ws) {
 async function runClassifyLoop(ws) {
   while (!stopRequested && classifySet.has(ws)) {
     const url = buildUrl('procesar_imagenes', ws);
+    const t0 = Date.now();
     const { ok, data } = await fetchJson(url);
-    self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data });
+    const durationMs = Date.now() - t0;
+    self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data, durationMs });
     if (!ok || !data?.success) break;
     if (data?.stopped_due_to_classifier_error) {
       classifySet.delete(ws);

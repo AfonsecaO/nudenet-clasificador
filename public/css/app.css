@@ -2095,12 +2095,36 @@ body.page-workspaces .topnav { flex-shrink: 0; }
 body.page-workspaces .main { flex: 1 1 0; min-height: 0; padding-top: 1.25rem; padding-left: 1rem; padding-right: 1rem; padding-bottom: 1.5rem; overflow: hidden; display: flex; flex-direction: column; }
 body.page-workspaces .ws-container { max-width: none; width: 100%; padding-left: 0; padding-right: 0; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 body.page-workspaces .ws-layout { flex: 1 1 0; min-height: 0; height: 0; align-items: stretch; display: flex; overflow: hidden; flex-wrap: nowrap; }
+/* Cuando el buscador está colapsado, la columna del grid crece y ocupa todo el espacio; el contenido se desplaza y el buscador queda como franja a la derecha */
+body.page-workspaces .ws-layout--buscador-collapsed > .col-lg-8.ws-grid-wrap,
+body.page-workspaces .ws-layout:has(.ws-search-col--collapsed) > .col-lg-8.ws-grid-wrap {
+  flex: 1 1 0 !important;
+  max-width: none !important;
+  min-width: 0;
+}
 /* Solo la columna izquierda (tarjetas) tiene scroll; min-height:0 permite que el flex limite la altura */
 body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding-bottom: 2rem; }
 .page-workspaces .ws-grid-spacer { min-height: 2.5rem; }
 /* Columna derecha: ocupa todo el alto con espaciado al final */
-.page-workspaces .ws-search-col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding-bottom: 1rem; }
+.page-workspaces .ws-search-col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding-bottom: 1rem; transition: flex-basis 0.25s ease, min-width 0.25s ease; }
+/* Colapsado: anular Bootstrap .col-lg-4; la columna queda fija en 48px a la derecha y no se encoge */
+.page-workspaces .ws-search-col.ws-search-col--collapsed {
+  flex: 0 0 48px !important;
+  flex-shrink: 0 !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  width: 48px !important;
+}
+.page-workspaces .ws-search-col.ws-search-col--collapsed .ws-search-consolidado-body { display: none; }
+.page-workspaces .ws-search-col.ws-search-col--collapsed .ws-search-consolidado-title { display: none; }
+.page-workspaces .ws-search-col.ws-search-col--collapsed .ws-search-consolidado-header { justify-content: center; margin-bottom: 0; }
+.page-workspaces .ws-search-col.ws-search-col--collapsed .ws-search-toggle { margin: 0; }
+.page-workspaces .ws-search-col.ws-search-col--collapsed .ws-search-toggle i { transform: rotate(180deg); }
 .page-workspaces .ws-search-consolidado { flex: 1; min-height: 0; max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado-header { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; margin-bottom: 0.75rem; }
+.page-workspaces .ws-search-consolidado-header .ws-search-consolidado-title { margin-bottom: 0; }
+.page-workspaces .ws-search-toggle { flex-shrink: 0; padding: 0.35rem 0.5rem; }
+.page-workspaces .ws-search-consolidado-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .page-workspaces .ws-search-consolidado .buscador-acordeon.ws-search-acordeon { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-carpetas .acordeon-item[data-acordeon="carpetas"] .acordeon-body,
 .page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-etiquetas .acordeon-item[data-acordeon="etiquetas"] .acordeon-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }

@@ -205,14 +205,23 @@ class ProcesarController extends BaseController
             // Recargar estado desde el archivo (el ProcesadorTablas ya lo actualizó y guardó)
             $estadoTracker->recargarEstado();
             $estadoProcesamiento = $estadoTracker->getEstado();
-            
+            $totalRegistros = 0;
+            $registrosProcesados = 0;
+            foreach ($estadoProcesamiento as $tabla => $info) {
+                $totalRegistros += (int)($info['max_id'] ?? 0);
+                $registrosProcesados += (int)($info['ultimo_id'] ?? 0);
+            }
+            $pendientesDescarga = max(0, $totalRegistros - $registrosProcesados);
+
             // Limpiar cualquier output inesperado antes de enviar JSON
             ob_clean();
-            
+
             $this->jsonResponse([
                 'success' => true,
                 'tabla' => $tablaProcesada,
                 'registro_procesado' => $registroProcesado,
+                'registros_en_peticion' => $procesadosEnPeticion,
+                'pendientes' => $pendientesDescarga,
                 'registro_id' => $registroId,
                 'total_imagenes' => $totalImagenes,
                 'total_duplicadas' => $totalDuplicadas,
