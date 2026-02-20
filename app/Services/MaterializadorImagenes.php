@@ -6,9 +6,12 @@ class MaterializadorImagenes
 {
     private $directorioBase;
     private $patronMaterializacion;
-    // Solo se aceptan JPG, JPEG, PNG y HEIC (convertido a JPG).
     private $extensionesValidas = ['jpg', 'jpeg', 'png'];
     private $seenMd5 = [];
+    /** Cache por request: compresión habilitada (null = no leído aún). */
+    private $compressionEnabled = null;
+    /** Cache por request: tamaño mínimo en bytes para comprimir (null = no leído aún, 0 = sin mínimo). */
+    private $compressMinBytes = null;
 
     public function __construct()
     {
@@ -40,8 +43,16 @@ class MaterializadorImagenes
     }
 
     /**
+     * Hash para dedupe: MD5 del dato directo (LONGTEXT base64 tal cual viene de la base).
+     */
+    private static function md5DatoDirecto(string $datoDirecto): string
+    {
+        return strtolower(md5($datoDirecto));
+    }
+
+    /**
      * Devuelve los MD5 que ya existen en el índice (content_md5 o raw_md5) para el workspace actual.
-     * Una o dos consultas en lugar de N.
+     * Una sola consulta UNION.
      */
     private function obtenerMd5ExistentesEnBatch(array $md5List): array
     {
@@ -59,13 +70,10 @@ class MaterializadorImagenes
             $tImg = AppConnection::table('images');
             $ws = AppConnection::currentSlug() ?? 'default';
             $ph = implode(',', array_fill(0, count($md5List), '?'));
-            $params = array_merge([$ws], $md5List);
-            $stmt = $pdo->prepare("SELECT content_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND content_md5 IN ({$ph})");
-            $stmt->execute($params);
-            while (($row = $stmt->fetch(\PDO::FETCH_NUM)) !== false && isset($row[0]) && $row[0] !== '') {
-                $existentes[$row[0]] = true;
-            }
-            $stmt = $pdo->prepare("SELECT raw_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND raw_md5 IN ({$ph})");
+            $params = array_merge([$ws], $md5List, [$ws], $md5List);
+            $sql = "SELECT content_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND content_md5 IN ({$ph}) " .
+                   "UNION SELECT raw_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND raw_md5 IN ({$ph})";
+            $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             while (($row = $stmt->fetch(\PDO::FETCH_NUM)) !== false && isset($row[0]) && $row[0] !== '') {
                 $existentes[$row[0]] = true;
@@ -205,6 +213,22 @@ class MaterializadorImagenes
     }
 
     /**
+     * Deriva la extensión de archivo desde el tipo MIME (evita re-extraer binario cuando ya tenemos MIME).
+     */
+    private function extensionDesdeMime(string $mime): string
+    {
+        if (strpos($mime, 'image/') !== 0) {
+            return 'jpg';
+        }
+        $sub = strtolower(substr($mime, strlen('image/')));
+        if ($sub === 'jpeg') return 'jpg';
+        if ($sub === 'svg+xml') return 'svg';
+        if ($sub === 'x-icon') return 'ico';
+        $sub = preg_replace('/[^a-z0-9]+/', '', $sub);
+        return $sub !== '' ? $sub : 'jpg';
+    }
+
+    /**
      * Obtiene la extensión de la imagen
      */
     private function obtenerExtension($datos)
@@ -262,6 +286,37 @@ class MaterializadorImagenes
 
         // Binario directo
         return $datos;
+    }
+
+    /**
+     * Indica si se debe comprimir la imagen según config (IMAGE_COMPRESSION_ENABLED, IMAGE_COMPRESS_MIN_BYTES).
+     * Cache por request.
+     */
+    private function debeComprimirImagen(int $sizeBytes): bool
+    {
+        if ($this->compressionEnabled === null) {
+            $v = ConfigService::obtenerOpcional('IMAGE_COMPRESSION_ENABLED', '1');
+            $this->compressionEnabled = ($v !== null && $v !== '' && $v !== '0' && strtolower($v) !== 'false' && strtolower($v) !== 'no');
+        }
+        if (!$this->compressionEnabled) {
+            return false;
+        }
+        if ($this->compressMinBytes === null) {
+            $v = ConfigService::obtenerOpcional('IMAGE_COMPRESS_MIN_BYTES', '0');
+            $this->compressMinBytes = ($v !== null && $v !== '') ? max(0, (int) $v) : 0;
+        }
+        return $sizeBytes >= $this->compressMinBytes;
+    }
+
+    /**
+     * Construye el nombre base para una imagen del registro (identificador_usrId_contador, normalizado).
+     */
+    private function nombreBaseParaRegistro(string $identificador, string $usrId, int $contador): string
+    {
+        $nombreBase = trim($identificador) . '_' . trim($usrId) . '_' . $contador;
+        $nombreBase = preg_replace('/\s+/', '_', $nombreBase);
+        $nombreBase = preg_replace('/_+/', '_', $nombreBase);
+        return trim($nombreBase, '_');
     }
 
     /**
@@ -346,7 +401,7 @@ class MaterializadorImagenes
     
     /**
      * Materializa una imagen desde datos de base de datos.
-     * Primer paso: dedupe con la imagen tal cual viene de la BD (raw). Si pasa, continúa materialización y optimización.
+     * Mantiene la firma pública para compatibilidad (Upload, tests). Resuelve binario+MIME y delega en materializarImagenDesdeBinario.
      */
     public function materializarImagen($datosImagen, $nombreBase, $fechaCreacion = null, $identificador = '', $resultado = '', $usrId = '')
     {
@@ -356,14 +411,41 @@ class MaterializadorImagenes
                 'error' => 'Los datos no son una imagen válida'
             ];
         }
+        $bin = $this->extraerDatosImagen($datosImagen);
+        $mime = $this->detectarMimeDesdeBinario($bin);
+        if ($mime === null || strpos($mime, 'image/') !== 0) {
+            return [
+                'success' => false,
+                'error' => 'Formato no reconocido. Solo se permiten JPG, JPEG, PNG y HEIC (convertido a JPG).'
+            ];
+        }
+        $hashDedupe = is_string($datosImagen) && $datosImagen !== ''
+            ? self::md5DatoDirecto($datosImagen)
+            : strtolower(md5($bin));
+        return $this->materializarImagenDesdeBinario(
+            ['bin' => $bin, 'mime' => $mime, 'hash_dedupe' => $hashDedupe],
+            $nombreBase,
+            $fechaCreacion,
+            $identificador,
+            $resultado,
+            $usrId
+        );
+    }
+
+    /**
+     * Materializa una imagen desde binario y MIME ya extraídos (evita decodificación y detección MIME repetidos).
+     * Flujo por fases: validación/dedupe raw → formato y conversión → ruta y nombre → comprimir/dedupe content → escritura.
+     */
+    private function materializarImagenDesdeBinario(array $binYMeta, string $nombreBase, $fechaCreacion = null, $identificador = '', $resultado = '', $usrId = '')
+    {
+        $datosBinariosRaw = $binYMeta['bin'];
+        $mime = $binYMeta['mime'] ?? null;
 
         try {
-            // 1) Extraer binario tal cual viene de la BD (antes de conversión/compresión)
-            $datosBinariosRaw = $this->extraerDatosImagen($datosImagen);
-            $rawMd5 = md5($datosBinariosRaw);
-            $rawMd5 = strtolower($rawMd5);
-
-            // 2) Primer proceso: dedupe con la imagen raw. Si ya existe, omitir sin materializar ni optimizar.
+            // — Fase 1: Dedupe por MD5(dato directo de la base) —
+            $rawMd5 = ($binYMeta['hash_dedupe'] ?? '') !== ''
+                ? $binYMeta['hash_dedupe']
+                : strtolower(md5($datosBinariosRaw));
             if ($this->yaExisteMd5($rawMd5)) {
                 $this->seenMd5[$rawMd5] = true;
                 return [
@@ -371,14 +453,14 @@ class MaterializadorImagenes
                     'duplicate' => true,
                     'md5' => $rawMd5,
                     'raw_md5' => $rawMd5,
-                    'mensaje' => 'Imagen duplicada (MD5 raw). Omitida.'
+                    'mensaje' => 'Imagen duplicada (MD5 dato directo). Omitida.'
                 ];
             }
             $this->seenMd5[$rawMd5] = true;
 
-            // 3) Continuar con formato, conversión HEIC y validación
+            // — Fase 2: Formato y conversión (MIME, HEIC→JPG si aplica, extensión final) —
             $datosBinarios = $datosBinariosRaw;
-            $mime = $this->detectarMimeDesdeBinario($datosBinarios);
+            $datosBinariosRaw = null;
             if ($mime === null || strpos($mime, 'image/') !== 0) {
                 return [
                     'success' => false,
@@ -396,7 +478,7 @@ class MaterializadorImagenes
                 $datosBinarios = $jpgBinary;
                 $extension = 'jpg';
             } elseif ($mime === 'image/jpeg' || $mime === 'image/png') {
-                $extension = $this->obtenerExtension($datosImagen);
+                $extension = $this->extensionDesdeMime($mime);
                 if ($extension === 'jpeg') $extension = 'jpg';
                 if (!in_array($extension, ['jpg', 'png'], true)) $extension = ($mime === 'image/png') ? 'png' : 'jpg';
             } else {
@@ -405,11 +487,9 @@ class MaterializadorImagenes
                     'error' => 'Formato no aceptado. Solo se permiten JPG, JPEG, PNG y HEIC (convertido a JPG).'
                 ];
             }
-            
-            // Limpiar usrId
+
+            // — Fase 3: Ruta y nombre (reemplazarVariablesPatron, directorio, generarNombreUnico) —
             $usrId = trim($usrId);
-            
-            // Reemplazar variables en el patrón
             $rutaCompleta = $this->reemplazarVariablesPatron(
                 $this->patronMaterializacion,
                 $identificador,
@@ -418,21 +498,16 @@ class MaterializadorImagenes
                 $fechaCreacion,
                 $extension
             );
-            
-            // Construir ruta completa desde el directorio base
             $rutaCompleta = $this->directorioBase . '/' . $rutaCompleta;
-            // Normalizar cada segmento de la ruta (nombres sin caracteres extraños)
             $relativa = str_replace($this->directorioBase . '/', '', $rutaCompleta);
             $relativa = StringNormalizer::normalizeRelativePath($relativa);
             if ($relativa !== '') {
                 $rutaCompleta = $this->directorioBase . '/' . $relativa;
             }
 
-            // Separar directorio y nombre de archivo
             $directorioDestino = dirname($rutaCompleta);
             $nombreArchivo = basename($rutaCompleta);
-            
-            // Crear directorio si no existe
+
             if (!is_dir($directorioDestino)) {
                 $creado = @mkdir($directorioDestino, 0755, true);
                 if (!$creado && !is_dir($directorioDestino)) {
@@ -442,21 +517,22 @@ class MaterializadorImagenes
                     ];
                 }
             }
-            
-            // Verificar si el archivo ya existe y generar nombre único con secuencia si es necesario
+
             $nombreArchivoSinExt = pathinfo($nombreArchivo, PATHINFO_FILENAME);
             $extensionArchivo = pathinfo($nombreArchivo, PATHINFO_EXTENSION);
             $nombreArchivoFinal = $this->generarNombreUnico($directorioDestino, $nombreArchivoSinExt, $extensionArchivo);
             $rutaCompleta = $directorioDestino . '/' . $nombreArchivoFinal;
 
-            // Comprimir imagen (jpg/png) para reducir peso manteniendo extensión
+            // — Fase 4: Comprimir y dedupe content (ImageCompressor, content MD5, salida temprana si duplicado) —
             $toSave = $datosBinarios;
-            $compressed = ImageCompressor::compress($datosBinarios, $extensionArchivo);
-            if ($compressed !== null) {
-                $toSave = $compressed;
+            if ($this->debeComprimirImagen(strlen($datosBinarios))) {
+                $compressed = ImageCompressor::compress($datosBinarios, $extensionArchivo);
+                if ($compressed !== null) {
+                    $toSave = $compressed;
+                }
             }
+            $datosBinarios = null; // Liberar referencia; ya no se necesita
 
-            // Calcular MD5 del archivo a guardar (por si el mismo contenido comprimido ya existía)
             $md5 = strtolower(md5($toSave));
             if (isset($this->seenMd5[$md5])) {
                 return [
@@ -469,9 +545,10 @@ class MaterializadorImagenes
             }
             $this->seenMd5[$md5] = true;
 
-            // Guardar datos
+            // — Fase 5: Escritura —
             $escrito = @file_put_contents($rutaCompleta, $toSave);
-            
+            $toSave = null;
+
             if ($escrito === false) {
                 return [
                     'success' => false,
@@ -504,15 +581,23 @@ class MaterializadorImagenes
         $resultados = [];
         $this->seenMd5 = [];
 
-        // Precalcular raw_md5 de todas las columnas con datos y cargar en batch los MD5 ya existentes en BD
+        // Hash de dedupe = MD5 del dato directo de la base (LONGTEXT base64 tal cual viene).
+        // para que varias columnas con el mismo nombre o varias “ranuras” no se sobrescriban y todas se materialicen.
         $rawMd5List = [];
-        foreach ($columnasImagen as $columna) {
-            if (isset($registro[$columna]) && !empty($registro[$columna]) && $this->esImagenValida($registro[$columna])) {
-                $bin = $this->extraerDatosImagen($registro[$columna]);
-                if (is_string($bin) && $bin !== '') {
-                    $rawMd5List[] = strtolower(md5($bin));
-                }
+        $binYMetaPorIndice = [];
+        foreach ($columnasImagen as $idx => $columna) {
+            $datoDirecto = $registro[$columna] ?? '';
+            if ($datoDirecto === '' || !$this->esImagenValida($datoDirecto)) {
+                continue;
             }
+            $bin = $this->extraerDatosImagen($datoDirecto);
+            if (!is_string($bin) || $bin === '') {
+                continue;
+            }
+            $mime = $this->detectarMimeDesdeBinario($bin);
+            $hashDedupe = self::md5DatoDirecto(is_string($datoDirecto) ? $datoDirecto : $bin);
+            $rawMd5List[] = $hashDedupe;
+            $binYMetaPorIndice[$idx] = ['bin' => $bin, 'mime' => $mime, 'hash_dedupe' => $hashDedupe];
         }
         if (!empty($rawMd5List)) {
             $existentes = $this->obtenerMd5ExistentesEnBatch($rawMd5List);
@@ -544,34 +629,25 @@ class MaterializadorImagenes
         $identificador = preg_replace('/[^a-zA-Z0-9_-]/', '', $identificador);
         $resultado = preg_replace('/[^a-zA-Z0-9_-]/', '', $resultado);
         
-        // Contador para numerar las imágenes
         $contador = 1;
-        
-        foreach ($columnasImagen as $columna) {
-            if (isset($registro[$columna]) && !empty($registro[$columna])) {
-                // El nombreBase ya no se usa directamente, pero lo mantenemos para compatibilidad
-                $nombreBase = trim($identificador) . '_' . trim($usrId) . '_' . $contador;
-                $nombreBase = preg_replace('/\s+/', '_', $nombreBase);
-                $nombreBase = preg_replace('/_+/', '_', $nombreBase);
-                $nombreBase = trim($nombreBase, '_');
-                
-                $resultadoImg = $this->materializarImagen(
-                    $registro[$columna],
+        foreach ($columnasImagen as $idx => $columna) {
+            $datoCelda = $registro[$columna] ?? '';
+            if ($datoCelda === '') {
+                $resultados[$idx] = ['success' => false, 'error' => 'Campo vacío'];
+                continue;
+            }
+            $nombreBase = $this->nombreBaseParaRegistro($identificador, $usrId, $contador);
+            $resultados[$idx] = isset($binYMetaPorIndice[$idx])
+                ? $this->materializarImagenDesdeBinario(
+                    $binYMetaPorIndice[$idx],
                     $nombreBase,
                     $fechaCreacion,
                     $identificador,
                     $resultado,
                     $usrId
-                );
-                
-                $resultados[$columna] = $resultadoImg;
-                $contador++; // Incrementar contador solo si la imagen se procesó
-            } else {
-                $resultados[$columna] = [
-                    'success' => false,
-                    'error' => 'Campo vacío'
-                ];
-            }
+                )
+                : $this->materializarImagen($registro[$columna], $nombreBase, $fechaCreacion, $identificador, $resultado, $usrId);
+            $contador++;
         }
         
         return $resultados;
