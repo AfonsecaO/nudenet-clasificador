@@ -90,6 +90,7 @@ function fmtTs($ts): string {
             <div class="ws-card-stats" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
               <div class="ws-stat"><span class="ws-stat-num" data-stat="images"><?php echo $imgTotal !== null ? number_format($imgTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-image"></i> Imágenes</span></div>
               <div class="ws-stat"><span class="ws-stat-num" data-stat="pending"><?php echo $imgPend !== null ? number_format($imgPend) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-hourglass-half"></i> Pendientes</span></div>
+              <div class="ws-stat ws-stat-errores-hint" style="display:none"><span class="ws-stat-num" data-stat="errores">0</span> en error (reintento al final)</div>
               <div class="ws-stat"><span class="ws-stat-num" data-stat="detections"><?php echo $detTotal !== null ? number_format($detTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-robot"></i> Detecciones</span></div>
               <?php if ($mode === 'db_and_images' && $registrosPendDescarga !== null): ?>
               <div class="ws-stat ws-stat-full"><span class="ws-stat-num" data-stat="registros-descarga"><?php echo number_format($registrosPendDescarga); ?></span><span class="ws-stat-lbl"><i class="fas fa-download"></i> Registros por descargar</span></div>
@@ -376,10 +377,10 @@ function fmtTs($ts): string {
       const url = apiUrlWs('procesar_imagenes', ws);
       const { ok, data } = await getJson(url);
       if (!ok || !data?.success || !classifyQueue.has(ws)) break;
+      // Si hubo error del clasificador, la imagen ya quedó marcada como error; no pausar: continuar con la siguiente.
       if (data?.stopped_due_to_classifier_error) {
-        classifyQueue.delete(ws);
-        updateProcessingPanel();
-        break;
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
       }
       const pending = data?.pendientes ?? data?.pending ?? 0;
       const total = data?.total ?? 0;
@@ -483,9 +484,16 @@ function fmtTs($ts): string {
     const imgEl = container.querySelector('.ws-stat-num[data-stat="images"]');
     const pendEl = container.querySelector('.ws-stat-num[data-stat="pending"]');
     const detEl = container.querySelector('.ws-stat-num[data-stat="detections"]');
+    const erroresHintEl = container.querySelector('.ws-stat-errores-hint');
+    const erroresNumEl = container.querySelector('.ws-stat-num[data-stat="errores"]');
     if (statsClasificacion.total !== undefined && imgEl) imgEl.textContent = Number(statsClasificacion.total).toLocaleString();
     if ((statsClasificacion.pendientes_deteccion !== undefined || statsClasificacion.pendientes !== undefined) && pendEl) pendEl.textContent = Number(statsClasificacion.pendientes_deteccion ?? statsClasificacion.pendientes ?? 0).toLocaleString();
     if (statsClasificacion.detections_total !== undefined && detEl) detEl.textContent = Number(statsClasificacion.detections_total).toLocaleString();
+    if (erroresHintEl && erroresNumEl) {
+      const errores = Number(statsClasificacion.errores ?? 0);
+      erroresNumEl.textContent = errores.toLocaleString();
+      erroresHintEl.style.display = errores > 0 ? '' : 'none';
+    }
   }
 
   function formatMetrics(type, stats, extra) {
@@ -532,7 +540,8 @@ function fmtTs($ts): string {
         total: data?.stats?.total ?? data?.total,
         pendientes: data?.pendientes,
         pendientes_deteccion: data?.pendientes_deteccion ?? data?.pendientes,
-        detections_total: data?.detections_total
+        detections_total: data?.detections_total,
+        errores: data?.stats_deteccion?.errores
       });
     }
   }

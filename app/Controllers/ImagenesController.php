@@ -179,6 +179,7 @@ class ImagenesController extends BaseController
                     'stats' => $stats,
                     'stats_deteccion' => $statsDet
                 ]);
+                return;
             }
 
             [$key, $record, $fase] = $siguiente;
@@ -205,163 +206,44 @@ class ImagenesController extends BaseController
                     'stats' => $stats,
                     'stats_deteccion' => $statsDet
                 ]);
+                return;
             }
 
+            $ignoredMap = $this->buildIgnoredLabelsMap();
             $baseUrl = \App\Services\ConfigService::obtenerOpcional('CLASIFICADOR_BASE_URL', 'http://localhost:8001/');
             $baseUrl = rtrim(trim($baseUrl), '/');
             $urlDetect = $baseUrl . '/detect';
 
-            $mime = @mime_content_type($rutaCompleta) ?: 'application/octet-stream';
-            $cfile = new \CURLFile($rutaCompleta, $mime, basename($rutaCompleta));
-
-            $safe = null;
-            $unsafe = null;
-            $resultado = null;
-            $detectOk = null;
-            $detectError = null;
-            $detecciones = [];
-            $etiquetas = [];
-
-            // Config: labels a ignorar (lista negra). Si una imagen SOLO tiene labels ignorados => safe.
-            $ignoredCsv = (string)\App\Services\ConfigService::obtenerOpcional('DETECT_IGNORED_LABELS', '');
-            $ignoredList = array_filter(array_map('trim', explode(',', $ignoredCsv)), fn($x) => $x !== '');
-            $ignoredMap = [];
-            foreach ($ignoredList as $c) {
-                $k = \App\Services\DetectionLabels::normalizeLabel((string)$c);
-                if ($k !== '') $ignoredMap[$k] = true;
-            }
-
-            $extractDetections = function ($json2): ?array {
-                if (!is_array($json2)) return null;
-                // NudeNet: {success:true, prediction:[...]}
-                if (isset($json2['prediction']) && is_array($json2['prediction'])) return $json2['prediction'];
-                // Lista directa []
-                if (empty($json2) || array_keys($json2) === range(0, count($json2) - 1)) return $json2;
-                // Formatos legacy
-                if (isset($json2['parts']) && is_array($json2['parts'])) return $json2['parts'];
-                if (isset($json2['detections']) && is_array($json2['detections'])) return $json2['detections'];
-                return null;
-            };
-
-            $normalizeDetection = function ($d): ?array {
-                if (!is_array($d)) return null;
-                $label = '';
-                if (isset($d['label'])) $label = (string)$d['label'];
-                elseif (isset($d['class'])) $label = (string)$d['class'];
-                $label = \App\Services\DetectionLabels::normalizeLabel($label);
-                if ($label === '') return null;
-
-                $score = null;
-                if (isset($d['score']) && is_numeric($d['score'])) $score = (float)$d['score'];
-                if ($score === null) return null;
-
-                $box = null;
-                if (isset($d['box']) && is_array($d['box']) && count($d['box']) === 4) {
-                    $b = array_values($d['box']);
-                    $x1 = is_numeric($b[0]) ? (float)$b[0] : null;
-                    $y1 = is_numeric($b[1]) ? (float)$b[1] : null;
-                    $x2 = is_numeric($b[2]) ? (float)$b[2] : null;
-                    $y2 = is_numeric($b[3]) ? (float)$b[3] : null;
-                    if ($x1 !== null && $y1 !== null && $x2 !== null && $y2 !== null) {
-                        // Soportar [x,y,w,h] además de [x1,y1,x2,y2]
-                        if ($x2 <= $x1 || $y2 <= $y1) {
-                            // interpretar como width/height si parece invertido
-                            if ($x2 > 0 && $y2 > 0) {
-                                $x2 = $x1 + $x2;
-                                $y2 = $y1 + $y2;
-                            }
-                        }
-                        // Normalizar min/max
-                        $minX = min($x1, $x2);
-                        $maxX = max($x1, $x2);
-                        $minY = min($y1, $y2);
-                        $maxY = max($y1, $y2);
-                        $box = [(int)round($minX), (int)round($minY), (int)round($maxX), (int)round($maxY)];
-                    }
-                }
-
-                return [
-                    'label' => $label,
-                    'score' => $score,
-                    'box' => $box
-                ];
-            };
-
-            // --- Detección (/detect) SIEMPRE ---
-            $ch2 = curl_init();
-            curl_setopt_array($ch2, [
-                CURLOPT_URL => $urlDetect,
-                CURLOPT_POST => true,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER => [
-                    'accept: application/json'
-                ],
-                CURLOPT_POSTFIELDS => [
-                    'file' => $cfile
-                ],
-                CURLOPT_TIMEOUT => 60
-            ]);
-
-            $body2 = curl_exec($ch2);
-            $curlErr2 = curl_error($ch2);
-            $httpCode2 = (int)curl_getinfo($ch2, CURLINFO_HTTP_CODE);
-
-            if ($body2 === false || $curlErr2) {
-                $detectOk = false;
-                $detectError = 'Error al llamar /detect: ' . ($curlErr2 ?: 'desconocido');
+            $apiResult = $this->callDetectApi($rutaCompleta, $urlDetect);
+            if ($apiResult['body'] === false || $apiResult['error'] !== '') {
+                $detectError = 'Error al llamar /detect: ' . ($apiResult['error'] ?: 'desconocido');
                 $imagenesIndex->marcarDeteccionError($key, $detectError);
+                $stats = $imagenesIndex->getStats(true);
+                $statsDet = $imagenesIndex->getStatsDeteccion(true);
                 $this->jsonResponse($this->buildProcesarResponseStoppedByClassifierError(
-                    $key, $record, $detectError, $imagenesIndex
+                    $key, $record, $detectError, $imagenesIndex, $stats, $statsDet
                 ));
                 return;
             }
-            $json2 = json_decode($body2 ?: '', true);
-            $rawDet = $extractDetections($json2);
-            if ($rawDet === null) {
-                $detectOk = false;
-                $detectError = 'Respuesta inválida de /detect';
-                $imagenesIndex->marcarDeteccionError($key, $detectError . ' (http ' . $httpCode2 . ')');
+
+            $parsed = $this->parseDetectResponse($apiResult['body'], $apiResult['http_code'], $ignoredMap);
+            if (isset($parsed['error'])) {
+                $imagenesIndex->marcarDeteccionError($key, $parsed['error']);
+                $stats = $imagenesIndex->getStats(true);
+                $statsDet = $imagenesIndex->getStatsDeteccion(true);
                 $this->jsonResponse($this->buildProcesarResponseStoppedByClassifierError(
-                    $key, $record, $detectError, $imagenesIndex
+                    $key, $record, $parsed['error'], $imagenesIndex, $stats, $statsDet
                 ));
                 return;
-            } else {
-                    $norm = [];
-                    foreach ($rawDet as $d) {
-                        $n = $normalizeDetection($d);
-                        if ($n) $norm[] = $n;
-                    }
-                    // Ignorar labels en lista negra
-                    $detecciones = array_values(array_filter($norm, function ($d) use ($ignoredMap) {
-                        if (!is_array($d)) return false;
-                        $lab = (string)($d['label'] ?? '');
-                        if ($lab === '') return false;
-                        return !isset($ignoredMap[$lab]);
-                    }));
-
-                    // Derivar etiquetas
-                    $tmp = [];
-                    foreach ($detecciones as $d) {
-                        $lab = (string)($d['label'] ?? '');
-                        if ($lab !== '') $tmp[$lab] = true;
-                    }
-                    $etiquetas = array_keys($tmp);
-
-                    // Nuevo criterio: unsafe = cualquier detección no ignorada.
-                    $unsafeScore = 0.0;
-                    foreach ($detecciones as $d) {
-                        $sc = isset($d['score']) && is_numeric($d['score']) ? (float)$d['score'] : null;
-                        if ($sc === null) continue;
-                        if ($sc > $unsafeScore) $unsafeScore = $sc;
-                    }
-
-                    $resultado = (count($detecciones) > 0) ? 'unsafe' : 'safe';
-                    $safe = ($resultado === 'safe') ? 1.0 : 0.0;
-                    $unsafe = ($resultado === 'unsafe') ? $unsafeScore : 0.0;
-
-                    $detectOk = true;
-                    $imagenesIndex->marcarDeteccion($key, $detecciones, $resultado, $unsafeScore);
             }
+
+            $detecciones = $parsed['detecciones'];
+            $etiquetas = $parsed['etiquetas'];
+            $resultado = $parsed['resultado'];
+            $unsafeScore = $parsed['unsafeScore'];
+            $safe = $parsed['safe'];
+            $unsafe = $parsed['unsafe'];
+            $imagenesIndex->marcarDeteccion($key, $detecciones, $resultado, $unsafeScore);
 
             $stats = $imagenesIndex->getStats(true);
             $statsDet = $imagenesIndex->getStatsDeteccion(true);
@@ -399,9 +281,9 @@ class ImagenesController extends BaseController
                 'unsafe' => $unsafe,
                 'resultado' => $resultado,
                 'detect' => [
-                    'ok' => $detectOk,
-                    'error' => $detectError,
-                    'count' => is_array($detecciones) ? count($detecciones) : null,
+                    'ok' => true,
+                    'error' => null,
+                    'count' => count($detecciones),
                     'etiquetas' => $etiquetas
                 ],
                 // Pendientes que se muestran en el panel (coinciden con stats.pendientes)
@@ -423,12 +305,184 @@ class ImagenesController extends BaseController
     }
 
     /**
+     * Mapa de labels a ignorar (lista negra): clave normalizada => true.
+     */
+    private function buildIgnoredLabelsMap(): array
+    {
+        $ignoredCsv = (string)\App\Services\ConfigService::obtenerOpcional('DETECT_IGNORED_LABELS', '');
+        $ignoredList = array_filter(array_map('trim', explode(',', $ignoredCsv)), fn($x) => $x !== '');
+        $ignoredMap = [];
+        foreach ($ignoredList as $c) {
+            $k = \App\Services\DetectionLabels::normalizeLabel((string)$c);
+            if ($k !== '') {
+                $ignoredMap[$k] = true;
+            }
+        }
+        return $ignoredMap;
+    }
+
+    /**
+     * Llama al endpoint /detect con el archivo; cierra el handle CURL. Devuelve ['body' => string, 'error' => string, 'http_code' => int].
+     */
+    private function callDetectApi(string $rutaCompleta, string $urlDetect): array
+    {
+        $mime = @mime_content_type($rutaCompleta) ?: 'application/octet-stream';
+        $cfile = new \CURLFile($rutaCompleta, $mime, basename($rutaCompleta));
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $urlDetect,
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ['accept: application/json'],
+            CURLOPT_POSTFIELDS => ['file' => $cfile],
+            CURLOPT_TIMEOUT => 60
+        ]);
+        $body = curl_exec($ch);
+        $err = curl_error($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        // PHP 8.5+: curl_close() está deprecada y no tiene efecto; el handle se libera al salir de ámbito
+        return ['body' => $body, 'error' => $err, 'http_code' => $httpCode];
+    }
+
+    /**
+     * Extrae el array de detecciones desde la respuesta JSON del clasificador.
+     */
+    private function extractDetectionsFromJson(?array $json): ?array
+    {
+        if (!is_array($json)) {
+            return null;
+        }
+        if (isset($json['prediction']) && is_array($json['prediction'])) {
+            return $json['prediction'];
+        }
+        if (empty($json) || array_keys($json) === range(0, count($json) - 1)) {
+            return $json;
+        }
+        if (isset($json['parts']) && is_array($json['parts'])) {
+            return $json['parts'];
+        }
+        if (isset($json['detections']) && is_array($json['detections'])) {
+            return $json['detections'];
+        }
+        return null;
+    }
+
+    /**
+     * Normaliza un ítem de detección a ['label','score','box'].
+     */
+    private function normalizeDetectionItem(mixed $d): ?array
+    {
+        if (!is_array($d)) {
+            return null;
+        }
+        $label = '';
+        if (isset($d['label'])) {
+            $label = (string)$d['label'];
+        } elseif (isset($d['class'])) {
+            $label = (string)$d['class'];
+        }
+        $label = \App\Services\DetectionLabels::normalizeLabel($label);
+        if ($label === '') {
+            return null;
+        }
+        $score = null;
+        if (isset($d['score']) && is_numeric($d['score'])) {
+            $score = (float)$d['score'];
+        }
+        if ($score === null) {
+            return null;
+        }
+        $box = null;
+        if (isset($d['box']) && is_array($d['box']) && count($d['box']) === 4) {
+            $b = array_values($d['box']);
+            $x1 = is_numeric($b[0]) ? (float)$b[0] : null;
+            $y1 = is_numeric($b[1]) ? (float)$b[1] : null;
+            $x2 = is_numeric($b[2]) ? (float)$b[2] : null;
+            $y2 = is_numeric($b[3]) ? (float)$b[3] : null;
+            if ($x1 !== null && $y1 !== null && $x2 !== null && $y2 !== null) {
+                if ($x2 <= $x1 || $y2 <= $y1) {
+                    if ($x2 > 0 && $y2 > 0) {
+                        $x2 = $x1 + $x2;
+                        $y2 = $y1 + $y2;
+                    }
+                }
+                $minX = min($x1, $x2);
+                $maxX = max($x1, $x2);
+                $minY = min($y1, $y2);
+                $maxY = max($y1, $y2);
+                $box = [(int)round($minX), (int)round($minY), (int)round($maxX), (int)round($maxY)];
+            }
+        }
+        return ['label' => $label, 'score' => $score, 'box' => $box];
+    }
+
+    /**
+     * Parsea la respuesta de /detect. Devuelve array con claves detecciones, etiquetas, resultado, unsafeScore, safe, unsafe;
+     * o ['error' => string] si la respuesta es inválida.
+     */
+    private function parseDetectResponse(string $body, int $httpCode, array $ignoredMap): array
+    {
+        $json = json_decode($body ?: '', true);
+        $rawDet = $this->extractDetectionsFromJson($json);
+        if ($rawDet === null) {
+            return ['error' => 'Respuesta inválida de /detect (http ' . $httpCode . ')'];
+        }
+        $norm = [];
+        foreach ($rawDet as $d) {
+            $n = $this->normalizeDetectionItem($d);
+            if ($n !== null) {
+                $norm[] = $n;
+            }
+        }
+        $detecciones = array_values(array_filter($norm, function ($d) use ($ignoredMap) {
+            if (!is_array($d)) {
+                return false;
+            }
+            $lab = (string)($d['label'] ?? '');
+            if ($lab === '') {
+                return false;
+            }
+            return !isset($ignoredMap[$lab]);
+        }));
+        $tmp = [];
+        foreach ($detecciones as $d) {
+            $lab = (string)($d['label'] ?? '');
+            if ($lab !== '') {
+                $tmp[$lab] = true;
+            }
+        }
+        $etiquetas = array_keys($tmp);
+        $unsafeScore = 0.0;
+        foreach ($detecciones as $d) {
+            $sc = isset($d['score']) && is_numeric($d['score']) ? (float)$d['score'] : null;
+            if ($sc !== null && $sc > $unsafeScore) {
+                $unsafeScore = $sc;
+            }
+        }
+        $resultado = (count($detecciones) > 0) ? 'unsafe' : 'safe';
+        $safe = ($resultado === 'safe') ? 1.0 : 0.0;
+        $unsafe = ($resultado === 'unsafe') ? $unsafeScore : 0.0;
+        return [
+            'detecciones' => $detecciones,
+            'etiquetas' => $etiquetas,
+            'resultado' => $resultado,
+            'unsafeScore' => $unsafeScore,
+            'safe' => $safe,
+            'unsafe' => $unsafe,
+        ];
+    }
+
+    /**
      * Respuesta cuando el clasificador (timeout/error) obliga a parar: la imagen queda en error y el cliente debe dejar de procesar.
      */
-    private function buildProcesarResponseStoppedByClassifierError(string $key, array $record, string $detectError, ImagenesIndex $imagenesIndex): array
+    private function buildProcesarResponseStoppedByClassifierError(string $key, array $record, string $detectError, ImagenesIndex $imagenesIndex, ?array $stats = null, ?array $statsDet = null): array
     {
-        $stats = $imagenesIndex->getStats(true);
-        $statsDet = $imagenesIndex->getStatsDeteccion(true);
+        if ($stats === null) {
+            $stats = $imagenesIndex->getStats(true);
+        }
+        if ($statsDet === null) {
+            $statsDet = $imagenesIndex->getStatsDeteccion(true);
+        }
         $pendientesClas = (int)($stats['pendientes'] ?? 0);
         $pendientesDet = (int)($statsDet['pendientes'] ?? 0);
         return [

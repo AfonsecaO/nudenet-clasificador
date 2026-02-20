@@ -251,7 +251,8 @@ class ImagenesIndex
             SELECT
                 SUM(CASE WHEN detect_requerida = 1 THEN 1 ELSE 0 END) AS requeridas,
                 SUM(CASE WHEN detect_requerida = 1 AND detect_estado = 'ok' THEN 1 ELSE 0 END) AS procesadas,
-                SUM(CASE WHEN detect_requerida = 1 AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error') THEN 1 ELSE 0 END) AS pendientes
+                SUM(CASE WHEN detect_requerida = 1 AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error') THEN 1 ELSE 0 END) AS pendientes,
+                SUM(CASE WHEN detect_requerida = 1 AND detect_estado = 'error' THEN 1 ELSE 0 END) AS errores
             FROM " . $this->tImages . "
             WHERE workspace_slug = :ws
         ");
@@ -260,6 +261,7 @@ class ImagenesIndex
         $requeridas = (int)($row['requeridas'] ?? 0);
         $procesadas = (int)($row['procesadas'] ?? 0);
         $pendientes = (int)($row['pendientes'] ?? 0);
+        $errores = (int)($row['errores'] ?? 0);
 
         $stmt = $this->pdo->prepare("
             SELECT label, COUNT(DISTINCT image_ruta_relativa) as c
@@ -278,6 +280,7 @@ class ImagenesIndex
             'requeridas' => $requeridas,
             'procesadas' => $procesadas,
             'pendientes' => $pendientes,
+            'errores' => $errores,
             'etiquetas' => $map,
             'actualizada_en' => date('Y-m-d H:i:s')
         ];
@@ -569,12 +572,13 @@ class ImagenesIndex
     public function obtenerSiguientePendienteProcesar(): ?array
     {
         $ws = $this->ws();
+        // Pendientes primero; errores al final para no reintentar la misma imagen en bucle (se reintentan al terminar los pendientes)
         $stmt = $this->pdo->prepare("
             SELECT " . self::IMAGE_RECORD_COLUMNS . "
             FROM " . $this->tImages . "
             WHERE workspace_slug = :ws
               AND (detect_estado = 'pending' OR detect_estado = 'na' OR detect_estado IS NULL OR detect_estado = 'error')
-            ORDER BY CASE WHEN detect_estado = 'error' THEN 0 ELSE 1 END, ruta_relativa ASC
+            ORDER BY CASE WHEN detect_estado = 'error' THEN 1 ELSE 0 END, ruta_relativa ASC
             LIMIT 1
         ");
         $stmt->execute([':ws' => $ws]);
@@ -589,7 +593,7 @@ class ImagenesIndex
         $row = $stmt->fetch();
         if ($row) {
             $k = (string)$row['ruta_relativa'];
-            return [$k, $this->rowToRecord($row), 'deteccion'];
+            return [$k, $this->rowToRecord($row), 'clasificacion'];
         }
 
         return null;
@@ -714,11 +718,7 @@ class ImagenesIndex
             $del = $this->pdo->prepare("DELETE FROM " . $this->tDetections . " WHERE workspace_slug = :ws AND image_ruta_relativa = :k");
             $del->execute([':ws' => $ws, ':k' => $key]);
 
-            $ins = $this->pdo->prepare("
-                INSERT INTO " . $this->tDetections . "(workspace_slug, image_ruta_relativa, label, score, x1, y1, x2, y2)
-                VALUES(:ws, :img, :label, :score, :x1, :y1, :x2, :y2)
-            ");
-
+            $rows = [];
             foreach ($detecciones as $d) {
                 if (!is_array($d)) continue;
                 $label = isset($d['label']) ? self::normalizarLabel((string)$d['label']) : '';
@@ -734,17 +734,25 @@ class ImagenesIndex
                     $x2 = (int)$box[2];
                     $y2 = (int)$box[3];
                 }
+                $rows[] = [$label, $score, $x1, $y1, $x2, $y2];
+            }
 
-                $ins->execute([
-                    ':ws' => $ws,
-                    ':img' => $key,
-                    ':label' => $label,
-                    ':score' => $score,
-                    ':x1' => $x1,
-                    ':y1' => $y1,
-                    ':x2' => $x2,
-                    ':y2' => $y2
-                ]);
+            if (!empty($rows)) {
+                $placeholders = implode(',', array_fill(0, count($rows), '(?,?,?,?,?,?,?,?)'));
+                $sql = "INSERT INTO " . $this->tDetections . " (workspace_slug, image_ruta_relativa, label, score, x1, y1, x2, y2) VALUES " . $placeholders;
+                $params = [];
+                foreach ($rows as $r) {
+                    $params[] = $ws;
+                    $params[] = $key;
+                    $params[] = $r[0];
+                    $params[] = $r[1];
+                    $params[] = $r[2];
+                    $params[] = $r[3];
+                    $params[] = $r[4];
+                    $params[] = $r[5];
+                }
+                $ins = $this->pdo->prepare($sql);
+                $ins->execute($params);
             }
             $this->pdo->commit();
         } catch (\Throwable $e) {

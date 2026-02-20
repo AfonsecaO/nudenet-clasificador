@@ -58,10 +58,11 @@ async function runClassifyLoop(ws) {
     const durationMs = Date.now() - t0;
     self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data, durationMs });
     if (!ok || !data?.success) break;
+    // Si hubo error del clasificador (timeout/respuesta inválida), la imagen ya quedó marcada como error;
+    // no pausar: continuar con la siguiente imagen tras un breve delay.
     if (data?.stopped_due_to_classifier_error) {
-      classifySet.delete(ws);
-      self.postMessage({ type: 'done', mode: 'classify', ws, stoppedDueToError: true });
-      break;
+      await sleep(1000);
+      continue;
     }
     const noMoreWork = data?.procesada === false && (data?.pendientes ?? data?.pending ?? 0) === 0;
     if (noMoreWork) {
