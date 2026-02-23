@@ -90,7 +90,7 @@ function fmtTs($ts): string {
             <div class="ws-card-stats" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
               <div class="ws-stat"><span class="ws-stat-num" data-stat="images"><?php echo $imgTotal !== null ? number_format($imgTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-image"></i> Imágenes</span></div>
               <div class="ws-stat"><span class="ws-stat-num" data-stat="pending"><?php echo $imgPend !== null ? number_format($imgPend) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-hourglass-half"></i> Pendientes</span></div>
-              <div class="ws-stat ws-stat-errores-hint" style="display:none"><span class="ws-stat-num" data-stat="errores">0</span> en error (reintento al final)</div>
+              <div class="ws-stat ws-stat-errores-hint" style="display:none"><span class="ws-stat-num" data-stat="errores">0</span><span class="ws-stat-lbl"><i class="fas fa-exclamation-circle"></i> Error</span></div>
               <div class="ws-stat"><span class="ws-stat-num" data-stat="detections"><?php echo $detTotal !== null ? number_format($detTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-robot"></i> Detecciones</span></div>
               <?php if ($mode === 'db_and_images' && $registrosPendDescarga !== null): ?>
               <div class="ws-stat ws-stat-full"><span class="ws-stat-num" data-stat="registros-descarga"><?php echo number_format($registrosPendDescarga); ?></span><span class="ws-stat-lbl"><i class="fas fa-download"></i> Registros por descargar</span></div>
@@ -358,6 +358,7 @@ function fmtTs($ts): string {
   }
 
   let mainThreadStopRequested = false;
+  // Única condición: la siguiente petición solo se inicia cuando la anterior haya finalizado (éxito, error o complete).
   async function runDownloadLoopMain(ws) {
     while (downloadQueue.has(ws) && !mainThreadStopRequested) {
       const url = apiUrlWs('procesar', ws);
@@ -369,19 +370,16 @@ function fmtTs($ts): string {
         updateProcessingPanel();
         break;
       }
-      await new Promise((r) => setTimeout(r, 50));
     }
   }
+  // Única condición: la siguiente petición solo se inicia cuando la anterior haya finalizado (éxito, error o complete).
   async function runClassifyLoopMain(ws) {
     while (classifyQueue.has(ws) && !mainThreadStopRequested) {
       const url = apiUrlWs('procesar_imagenes', ws);
       const { ok, data } = await getJson(url);
       if (!ok || !data?.success || !classifyQueue.has(ws)) break;
-      // Si hubo error del clasificador, la imagen ya quedó marcada como error; no pausar: continuar con la siguiente.
-      if (data?.stopped_due_to_classifier_error) {
-        await new Promise((r) => setTimeout(r, 1000));
-        continue;
-      }
+      // Si hubo error del clasificador, la imagen ya quedó marcada como error; continuar con la siguiente.
+      if (data?.stopped_due_to_classifier_error) continue;
       const pending = data?.pendientes ?? data?.pending ?? 0;
       const total = data?.total ?? 0;
       const procesadas = data?.procesadas ?? 0;
@@ -390,7 +388,6 @@ function fmtTs($ts): string {
         updateProcessingPanel();
         break;
       }
-      await new Promise((r) => setTimeout(r, 50));
     }
   }
 
