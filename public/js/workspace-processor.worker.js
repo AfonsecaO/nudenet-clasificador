@@ -21,10 +21,6 @@ function buildUrl(action, ws) {
   return baseUrl + sep + params;
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 async function fetchJson(url) {
   const r = await fetch(url, { headers: { accept: 'application/json' } });
   const data = await r.json().catch(() => ({}));
@@ -32,6 +28,7 @@ async function fetchJson(url) {
 }
 
 async function runDownloadLoop(ws) {
+  // Única condición: la siguiente petición solo se inicia cuando la anterior haya finalizado (éxito, error o complete).
   while (!stopRequested && downloadSet.has(ws)) {
     const url = buildUrl('procesar', ws);
     const t0 = Date.now();
@@ -46,11 +43,11 @@ async function runDownloadLoop(ws) {
       self.postMessage({ type: 'done', mode: 'download', ws });
       break;
     }
-    await sleep(200);
   }
 }
 
 async function runClassifyLoop(ws) {
+  // Única condición: la siguiente petición solo se inicia cuando la anterior haya finalizado (éxito, error o complete).
   while (!stopRequested && classifySet.has(ws)) {
     const url = buildUrl('procesar_imagenes', ws);
     const t0 = Date.now();
@@ -58,19 +55,14 @@ async function runClassifyLoop(ws) {
     const durationMs = Date.now() - t0;
     self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data, durationMs });
     if (!ok || !data?.success) break;
-    // Si hubo error del clasificador (timeout/respuesta inválida), la imagen ya quedó marcada como error;
-    // no pausar: continuar con la siguiente imagen tras un breve delay.
-    if (data?.stopped_due_to_classifier_error) {
-      await sleep(1000);
-      continue;
-    }
+    // Si hubo error del clasificador (timeout/respuesta inválida), la imagen ya quedó marcada como error; continuar con la siguiente.
+    if (data?.stopped_due_to_classifier_error) continue;
     const noMoreWork = data?.procesada === false && (data?.pendientes ?? data?.pending ?? 0) === 0;
     if (noMoreWork) {
       classifySet.delete(ws);
       self.postMessage({ type: 'done', mode: 'classify', ws });
       break;
     }
-    await sleep(200);
   }
 }
 
