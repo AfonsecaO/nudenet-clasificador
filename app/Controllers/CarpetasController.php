@@ -560,7 +560,7 @@ class CarpetasController extends BaseController
             $rutaNorm = trim($rutaNorm, '/');
 
             $stmtImg = $pdo->prepare("
-                SELECT ruta_relativa, archivo, clasif_estado, detect_estado
+                SELECT ruta_relativa, archivo, clasif_estado, detect_estado, ruta_completa
                 FROM {$tImg}
                 WHERE workspace_slug = :ws AND COALESCE(ruta_carpeta,'') = :rc
             ");
@@ -578,6 +578,7 @@ class CarpetasController extends BaseController
                 $pend = ($det !== 'ok') || ($clas === 'pending');
                 $byArchivo[$archivo] = [
                     'ruta_relativa' => $rrel,
+                    'ruta_completa' => $r['ruta_completa'] ?? null,
                     'pendiente' => $pend,
                     'tagsMap' => []
                 ];
@@ -608,41 +609,31 @@ class CarpetasController extends BaseController
                 }
             }
 
-            // Obtener archivos de la carpeta
-            $archivos = scandir($rutaCompleta);
+            // Listado solo desde BD (tabla images) para esta carpeta
             $archivosInfo = [];
-            
             $extensionesImagen = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'avif', 'heic', 'heif', 'ico', 'svg'];
-            
-            foreach ($archivos as $archivo) {
-                if ($archivo === '.' || $archivo === '..') {
-                    continue;
-                }
-                
-                $rutaArchivo = $rutaCompleta . '/' . $archivo;
-                
-                // Solo procesar archivos
-                if (!is_file($rutaArchivo)) {
-                    continue;
-                }
-                
+
+            foreach ($byArchivo as $archivo => $data) {
                 $extension = strtolower(pathinfo($archivo, PATHINFO_EXTENSION));
                 $esImagen = in_array($extension, $extensionesImagen);
-                
+                $rutaCompletaArchivo = $data['ruta_completa'] ?? null;
+                $tamano = 0;
+                if ($rutaCompletaArchivo !== null && $rutaCompletaArchivo !== '' && is_file($rutaCompletaArchivo)) {
+                    $tamano = (int)@filesize($rutaCompletaArchivo);
+                }
+
                 $archivosInfo[] = [
                     'nombre' => $archivo,
                     'es_imagen' => $esImagen,
                     'extension' => $extension,
-                    'tamano' => filesize($rutaArchivo),
-                    // Metadata de SQLite (si existe)
-                    'ruta_relativa' => $byArchivo[$archivo]['ruta_relativa'] ?? (($rutaNorm !== '' ? ($rutaNorm . '/' . $archivo) : $archivo)),
-                    'pendiente' => (bool)($byArchivo[$archivo]['pendiente'] ?? true),
-                    'tags' => array_keys(($byArchivo[$archivo]['tagsMap'] ?? []))
+                    'tamano' => $tamano,
+                    'ruta_relativa' => $data['ruta_relativa'],
+                    'pendiente' => (bool)$data['pendiente'],
+                    'tags' => array_keys($data['tagsMap'])
                 ];
             }
-            
-            // Ordenar por nombre
-            usort($archivosInfo, function($a, $b) {
+
+            usort($archivosInfo, function ($a, $b) {
                 return strnatcasecmp($a['nombre'], $b['nombre']);
             });
             
