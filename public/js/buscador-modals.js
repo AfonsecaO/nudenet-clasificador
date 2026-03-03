@@ -140,7 +140,7 @@
   var thumbDebounceViewport = { queue: [], timer: null };
   var thumbDebounceByRoot = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
 
-  var THUMB_MAX_CONCURRENT = 4;
+  var THUMB_MAX_CONCURRENT = 6;
   var thumbConcurrency = { inFlight: 0, queue: [] };
 
   function runNextThumbLoad() {
@@ -559,16 +559,12 @@
     showModal(cfg.refs.modalVisor);
 
     const img = new Image();
-    img.onload = async function () {
+    img.onload = function () {
       visor.img = img;
-      const detUrl = buildUrl('?action=imagen_detecciones&ruta_relativa=' + encodeURIComponent(visor.rutaRelativa), currentWorkspace);
-      const res = await cfg.getJson(detUrl);
-      const pending = !!res?.data?.pending;
-      const dets = Array.isArray(res?.data?.detections) ? res.data.detections : [];
-      visor.detections = dets;
-      renderDetBadges(dets, pending);
+      visor.detections = [];
+      renderDetBadges([], false);
       drawCanvas();
-      if (typeof cfg.setStatus === 'function' && stVisor) cfg.setStatus(stVisor, 'ok', pending ? 'Pendiente de procesamiento' : 'OK');
+      if (typeof cfg.setStatus === 'function' && stVisor) cfg.setStatus(stVisor, 'ok', 'OK');
     };
     img.onerror = function () {
       if (typeof cfg.setStatus === 'function' && stVisor) cfg.setStatus(stVisor, 'bad', 'No se pudo cargar la imagen');
@@ -659,6 +655,8 @@
     if (swBoxes) swBoxes.addEventListener('change', drawCanvas);
   }
 
+  var OPEN_GALLERY_MAX_ITEMS = 200;
+
   /** Abre el modal de carpeta con una lista de resultados (ej. búsqueda por etiqueta global). items: [{ workspace, ruta_carpeta, archivo, ruta_relativa }] */
   function openGalleryResultados(items) {
     const gridThumbs = cfg?.refs?.gridThumbs;
@@ -666,7 +664,12 @@
     const tagsCarpeta = cfg?.refs?.tagsCarpeta;
     if (!gridThumbs) return;
     const arr = Array.isArray(items) ? items : [];
-    if (ttlCarpeta) ttlCarpeta.textContent = 'Resultados de búsqueda (' + arr.length + ')';
+    const total = arr.length;
+    const limited = total > OPEN_GALLERY_MAX_ITEMS ? arr.slice(0, OPEN_GALLERY_MAX_ITEMS) : arr;
+    const titleText = total > OPEN_GALLERY_MAX_ITEMS
+      ? 'Resultados de búsqueda (Mostrando ' + OPEN_GALLERY_MAX_ITEMS + ' de ' + total + ')'
+      : 'Resultados de búsqueda (' + total + ')';
+    if (ttlCarpeta) ttlCarpeta.textContent = titleText;
     if (tagsCarpeta) tagsCarpeta.innerHTML = '';
     gridThumbs.innerHTML = getGridLoaderHtml();
     showModal(cfg.refs.modalCarpeta);
@@ -679,8 +682,8 @@
       return;
     }
     const fragment = document.createDocumentFragment();
-    for (let i = 0; i < arr.length; i++) {
-      const it = arr[i];
+    for (let i = 0; i < limited.length; i++) {
+      const it = limited[i];
       const ws = String(it?.workspace || '').trim();
       const rutaCarpeta = String(it?.ruta_carpeta || it?.ruta || '').trim();
       const archivo = String(it?.archivo || '').trim();
@@ -719,6 +722,12 @@
     }
     gridThumbs.innerHTML = '';
     while (fragment.firstChild) gridThumbs.appendChild(fragment.firstChild);
+    if (total > OPEN_GALLERY_MAX_ITEMS) {
+      const msg = document.createElement('div');
+      msg.className = 'col-12 text-muted mt-2 small';
+      msg.textContent = 'Mostrando ' + OPEN_GALLERY_MAX_ITEMS + ' de ' + total + ' resultados. Ajusta la búsqueda para acotar.';
+      gridThumbs.appendChild(msg);
+    }
   }
 
   function moveFocusOutOfModal(modalEl) {

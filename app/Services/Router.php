@@ -21,8 +21,6 @@ class Router
     {
         return in_array($route, [
             'buscar_carpetas_global',
-            'etiquetas_detectadas_global',
-            'buscar_imagenes_etiquetas_global',
         ], true);
     }
 
@@ -133,18 +131,7 @@ class Router
                     return;
                 }
                 $routeConfig = $routes[$route];
-                $controllerName = $routeConfig['controller'];
-                $method = $routeConfig['method'];
-
-                $controllerClass = "App\\Controllers\\{$controllerName}";
-                if (!class_exists($controllerClass)) {
-                    throw new \Exception("Controlador no encontrado: {$controllerClass}");
-                }
-                $controller = new $controllerClass();
-                if (!method_exists($controller, $method)) {
-                    throw new \Exception("Método no encontrado en {$controllerClass}: {$method}");
-                }
-                $controller->$method();
+                self::runController($routeConfig['controller'], $routeConfig['method']);
                 return;
             }
 
@@ -156,25 +143,13 @@ class Router
                     return;
                 }
                 $routeConfig = $routes[$route];
-                $controllerName = $routeConfig['controller'];
-                $method = $routeConfig['method'];
-
-                $controllerClass = "App\\Controllers\\{$controllerName}";
-                if (!class_exists($controllerClass)) {
-                    throw new \Exception("Controlador no encontrado: {$controllerClass}");
-                }
-                $controller = new $controllerClass();
-                if (!method_exists($controller, $method)) {
-                    throw new \Exception("Método no encontrado en {$controllerClass}: {$method}");
-                }
-                $controller->$method();
+                self::runController($routeConfig['controller'], $routeConfig['method']);
                 return;
             }
 
-            // Asegurar conexión + esquema (y migración legacy si aplica) - ya con workspace resuelto
+            // Asegurar conexión + esquema - ya con workspace resuelto
             $pdo = AppConnection::get();
             AppSchema::ensure($pdo);
-            SqliteMigrator::bootstrap();
 
             // Verificar si la ruta existe
             if (!isset($routes[$route])) {
@@ -208,30 +183,30 @@ class Router
                 $method = 'index';
             }
             
-            // Construir el nombre completo de la clase del controlador
-            $controllerClass = "App\\Controllers\\{$controllerName}";
-            
-            // Verificar que la clase existe
-            if (!class_exists($controllerClass)) {
-                throw new \Exception("Controlador no encontrado: {$controllerClass}");
-            }
-            
-            // Instanciar el controlador
-            $controller = new $controllerClass();
-            
-            // Verificar que el método existe
-            if (!method_exists($controller, $method)) {
-                throw new \Exception("Método no encontrado en {$controllerClass}: {$method}");
-            }
-            
-            // Ejecutar el método del controlador
-            $controller->$method();
+            // Ejecutar el método del controlador (posiblemente forzado a SetupController::index)
+            self::runController($controllerName, $method);
             
         } catch (\Exception $e) {
             self::handleError($e);
         }
     }
     
+    /**
+     * Instancia el controlador y ejecuta el método (DRY para las tres ramas de despacho).
+     */
+    private static function runController(string $controllerName, string $method): void
+    {
+        $controllerClass = "App\\Controllers\\{$controllerName}";
+        if (!class_exists($controllerClass)) {
+            throw new \Exception("Controlador no encontrado: {$controllerClass}");
+        }
+        $controller = new $controllerClass();
+        if (!method_exists($controller, $method)) {
+            throw new \Exception("Método no encontrado en {$controllerClass}: {$method}");
+        }
+        $controller->$method();
+    }
+
     /**
      * Maneja errores 404 (Ruta no encontrada)
      */
@@ -247,15 +222,26 @@ class Router
     }
     
     /**
-     * Maneja errores generales
+     * Maneja errores generales.
+     * En producción no se expone el mensaje de la excepción; se registra en AppLogger.
      */
     private static function handleError(\Exception $e)
     {
+        $isProd = (getenv('APP_ENV') ?: 'dev') === 'prod';
+        if ($isProd) {
+            \App\Services\AppLogger::error('Unhandled exception', [
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            $message = 'Error interno del servidor';
+        } else {
+            $message = $e->getMessage();
+        }
         header('Content-Type: application/json');
         http_response_code(500);
         echo json_encode([
             'success' => false,
-            'error' => $e->getMessage()
+            'error' => $message
         ]);
         exit;
     }

@@ -37,15 +37,27 @@ class AppConnection
         return $path;
     }
 
+    /** Logical name -> physical table name (normalized schema). */
+    private static function tableNameFor(string $name): string
+    {
+        $map = [
+            'meta' => 'workspace_meta',
+            'tables_state' => 'table_states',
+            'tables_index' => 'table_indexes',
+        ];
+        return $map[$name] ?? $name;
+    }
+
     /**
-     * Nombre de tabla (sin prefijo; todas las tablas son compartidas con columna workspace_slug).
+     * Nombre de tabla (normalizado; todas las tablas son compartidas con columna workspace_slug).
      */
     public static function table(string $name): string
     {
+        $physical = self::tableNameFor($name);
         if (self::$currentDriver === 'mysql') {
-            return '`' . str_replace('`', '``', $name) . '`';
+            return '`' . str_replace('`', '``', $physical) . '`';
         }
-        return $name;
+        return $physical;
     }
 
     public static function getCurrentDriver(): string

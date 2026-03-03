@@ -22,23 +22,23 @@ class CarpetasIndex
         $driver = \App\Services\AppConnection::getCurrentDriver();
         if ($driver === 'mysql') {
             return $this->pdo->prepare("
-                INSERT INTO " . $this->tFolders . "(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+                INSERT INTO " . $this->tFolders . "(workspace_slug, folder_path, name, search_key, image_count, updated_at)
                 VALUES(:ws, :ruta, :nombre, :search_key, :total, :t)
                 ON DUPLICATE KEY UPDATE
-                  nombre = VALUES(nombre),
+                  name = VALUES(name),
                   search_key = VALUES(search_key),
-                  total_imagenes = VALUES(total_imagenes),
-                  actualizada_en = VALUES(actualizada_en)
+                  image_count = VALUES(image_count),
+                  updated_at = VALUES(updated_at)
             ");
         }
         return $this->pdo->prepare("
-            INSERT INTO " . $this->tFolders . "(workspace_slug, ruta_carpeta, nombre, search_key, total_imagenes, actualizada_en)
+            INSERT INTO " . $this->tFolders . "(workspace_slug, folder_path, name, search_key, image_count, updated_at)
             VALUES(:ws, :ruta, :nombre, :search_key, :total, :t)
-            ON CONFLICT(workspace_slug, ruta_carpeta) DO UPDATE SET
-              nombre=excluded.nombre,
+            ON CONFLICT(workspace_slug, folder_path) DO UPDATE SET
+              name=excluded.name,
               search_key=excluded.search_key,
-              total_imagenes=excluded.total_imagenes,
-              actualizada_en=excluded.actualizada_en
+              image_count=excluded.image_count,
+              updated_at=excluded.updated_at
         ");
     }
 
@@ -61,7 +61,7 @@ class CarpetasIndex
 
     public function getCarpetas(): array
     {
-        $stmt = $this->pdo->prepare('SELECT ruta_carpeta as ruta, nombre, total_imagenes FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws ORDER BY ruta_carpeta ASC');
+        $stmt = $this->pdo->prepare('SELECT folder_path as ruta, name as nombre, image_count FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws ORDER BY folder_path ASC');
         $stmt->execute([':ws' => $this->ws()]);
         $rows = $stmt->fetchAll();
         $out = [];
@@ -74,7 +74,7 @@ class CarpetasIndex
             $out[] = [
                 'ruta' => $ruta,
                 'nombre' => $nombre,
-                'total_imagenes' => (int)($r['total_imagenes'] ?? 0)
+                'total_imagenes' => (int)($r['image_count'] ?? 0)
             ];
         }
         return $out;
@@ -82,6 +82,7 @@ class CarpetasIndex
 
     /**
      * Búsqueda por subcadena sobre llave normalizada (search_key).
+     * Si el término no contiene espacios, usa prefijo (LIKE term%) para aprovechar índice.
      */
     public function buscarPorSearchKey(string $searchKey, int $limit = 200): array
     {
@@ -89,15 +90,20 @@ class CarpetasIndex
         if ($searchKey === '') return [];
         $limit = max(1, min(500, (int)$limit));
 
+        // Prefijo cuando no hay espacios: permite uso de índice en search_key
+        $likePattern = (strpos($searchKey, ' ') === false)
+            ? $searchKey . '%'
+            : '%' . $searchKey . '%';
+
         $stmt = $this->pdo->prepare("
-            SELECT ruta_carpeta as ruta, nombre, total_imagenes
+            SELECT folder_path as ruta, name as nombre, image_count
             FROM " . $this->tFolders . "
             WHERE workspace_slug = :ws AND COALESCE(search_key, '') LIKE :q
-            ORDER BY total_imagenes DESC, ruta_carpeta ASC
+            ORDER BY image_count DESC, folder_path ASC
             LIMIT :lim
         ");
         $stmt->bindValue(':ws', $this->ws(), \PDO::PARAM_STR);
-        $stmt->bindValue(':q', '%' . $searchKey . '%', \PDO::PARAM_STR);
+        $stmt->bindValue(':q', $likePattern, \PDO::PARAM_STR);
         $stmt->bindValue(':lim', $limit, \PDO::PARAM_INT);
         $stmt->execute();
         $rows = $stmt->fetchAll() ?: [];
@@ -112,7 +118,7 @@ class CarpetasIndex
             $out[] = [
                 'ruta' => $ruta,
                 'nombre' => $nombre,
-                'total_imagenes' => (int)($r['total_imagenes'] ?? 0)
+                'total_imagenes' => (int)($r['image_count'] ?? 0)
             ];
         }
         return $out;
@@ -131,10 +137,10 @@ class CarpetasIndex
             $del->execute([':ws' => $ws]);
 
             $stmtImg = $this->pdo->prepare("
-                SELECT COALESCE(ruta_carpeta, '') as ruta, COUNT(*) as total
+                SELECT COALESCE(folder_path, '') as ruta, COUNT(*) as total
                 FROM " . $this->tImages . "
                 WHERE workspace_slug = :ws
-                GROUP BY COALESCE(ruta_carpeta, '')
+                GROUP BY COALESCE(folder_path, '')
             ");
             $stmtImg->execute([':ws' => $ws]);
             $rows = $stmtImg->fetchAll();
@@ -165,7 +171,7 @@ class CarpetasIndex
         $cnt = $this->pdo->prepare('SELECT COUNT(*) FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws');
         $cnt->execute([':ws' => $ws]);
         $totalCarpetas = (int)$cnt->fetchColumn();
-        $sum = $this->pdo->prepare('SELECT COALESCE(SUM(total_imagenes),0) FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws');
+        $sum = $this->pdo->prepare('SELECT COALESCE(SUM(image_count),0) FROM ' . $this->tFolders . ' WHERE workspace_slug = :ws');
         $sum->execute([':ws' => $ws]);
         $totalImagenes = (int)$sum->fetchColumn();
 

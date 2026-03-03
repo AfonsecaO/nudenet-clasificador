@@ -34,6 +34,11 @@ $__bodyClass = 'page-wizard';
                   <p class="small text-muted ml-4">Una base de datos en un servidor. Configuración en Parametrización global después.</p>
                 </div>
               </div>
+              <div class="form-group">
+                <label class="font-weight-bold" for="registros_descarga">Registros por descarga</label>
+                <input type="number" id="registros_descarga" name="registros_descarga" class="form-control" min="1" max="1000" value="<?= (int) ($registros_descarga ?? 1) ?>" aria-describedby="registros_descarga_help">
+                <small id="registros_descarga_help" class="form-text text-muted">Número de registros a procesar por petición al descargar imágenes (1–1000).</small>
+              </div>
               <button type="submit" class="btn btn-primary">
                 <i class="fas fa-arrow-right"></i> Continuar
               </button>

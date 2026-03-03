@@ -7,11 +7,9 @@ class ConfigService
     // Requeridos "mínimos" por workspace (siempre)
     private static $parametrosRequeridos = [
         'WORKSPACE_MODE',          // images_only | db_and_images
-        'CLASIFICADOR_BASE_URL',   // obligatorio
     ];
-    
+
     private static $parametrosOpcionales = [
-        // DB + schema (opcionales si WORKSPACE_MODE=images_only)
         'DB_HOST',
         'DB_PORT',
         'DB_NAME',
@@ -25,14 +23,8 @@ class ConfigService
         'COLUMNAS_IMAGEN',
         'CAMPO_RESULTADO',
         'PATRON_MATERIALIZACION',
-        'CLASIFICADOR_BASE_URL',
-        // CSV de labels a IGNORAR en /detect (lista negra). Labels normalizados en MAYÚSCULAS.
-        'DETECT_IGNORED_LABELS',
-
-        // Deprecados (mantener para no romper setups antiguos; se limpian al guardar)
         'DIRECTORIO_IMAGENES',
         'UMBRAL_CLASIFICACION',
-        'DETECT_UNSAFE_CLASSES',
     ];
     
     /**

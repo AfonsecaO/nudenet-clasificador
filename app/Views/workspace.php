@@ -56,8 +56,6 @@ function fmtTs($ts): string {
           $configured = !empty($ws['configured']);
           $mode = (string)($ws['mode'] ?? '');
           $imgTotal = isset($ws['images_total']) ? (int)$ws['images_total'] : null;
-          $imgPend = isset($ws['images_pending']) ? (int)$ws['images_pending'] : null;
-          $detTotal = isset($ws['detections_total']) ? (int)$ws['detections_total'] : null;
           $registrosPendDescarga = isset($ws['registros_pendientes_descarga']) ? (int)$ws['registros_pendientes_descarga'] : null;
           $createdAt = fmtTs($ws['created_at'] ?? null);
           $updatedAt = (string)($ws['updated_at'] ?? '');
@@ -86,12 +84,10 @@ function fmtTs($ts): string {
               <span class="ws-badge ws-badge--<?php echo $configured ? 'ok' : 'warn'; ?>"><?php echo $configured ? 'Configurado' : 'Pendiente'; ?></span>
               <span class="ws-badge ws-badge--mode"><?php echo htmlspecialchars($modeLabel, ENT_QUOTES); ?></span>
             </div>
-            <?php if ($imgTotal !== null || $imgPend !== null || $detTotal !== null || $registrosPendDescarga !== null): ?>
+            <?php if ($imgTotal !== null || $registrosPendDescarga !== null): ?>
             <div class="ws-card-stats" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
               <div class="ws-stat"><span class="ws-stat-num" data-stat="images"><?php echo $imgTotal !== null ? number_format($imgTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-image"></i> Imágenes</span></div>
-              <div class="ws-stat"><span class="ws-stat-num" data-stat="pending"><?php echo $imgPend !== null ? number_format($imgPend) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-hourglass-half"></i> Pendientes</span></div>
               <div class="ws-stat ws-stat-errores-hint" style="display:none"><span class="ws-stat-num" data-stat="errores">0</span><span class="ws-stat-lbl"><i class="fas fa-exclamation-circle"></i> Error</span></div>
-              <div class="ws-stat"><span class="ws-stat-num" data-stat="detections"><?php echo $detTotal !== null ? number_format($detTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-robot"></i> Detecciones</span></div>
               <?php if ($mode === 'db_and_images' && $registrosPendDescarga !== null): ?>
               <div class="ws-stat ws-stat-full"><span class="ws-stat-num" data-stat="registros-descarga"><?php echo number_format($registrosPendDescarga); ?></span><span class="ws-stat-lbl"><i class="fas fa-download"></i> Registros por descargar</span></div>
               <?php endif; ?>
@@ -104,15 +100,10 @@ function fmtTs($ts): string {
               <button class="btn btn-outline-secondary btn-sm btnSetupWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Parametrización">
                 <i class="fas fa-cog"></i> Parametrización
               </button>
-              <?php if ($configured): ?>
-                <?php if ($mode === 'db_and_images'): ?>
-                <button type="button" class="btn btn-outline-info btn-sm btn-worker btnWsDescargar" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Descargar tablas aquí">
-                  <i class="fas fa-download"></i> Descargar
-                </button>
-                <?php endif; ?>
-                <button type="button" class="btn btn-outline-success btn-sm btn-worker btnWsClasificar" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Clasificar aquí">
-                  <i class="fas fa-robot"></i> Clasificar
-                </button>
+              <?php if ($configured && $mode === 'db_and_images'): ?>
+              <button type="button" class="btn btn-outline-info btn-sm btn-worker btnWsDescargar ws-card-actions-btn-descargar" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Descargar tablas aquí">
+                <i class="fas fa-download"></i> Descargar
+              </button>
               <?php endif; ?>
             </div>
           </div>
@@ -341,7 +332,6 @@ function fmtTs($ts): string {
 
   // --- Procesamiento en la misma pantalla con Web Worker (ejecución paralela) ---
   const downloadQueue = new Set();
-  const classifyQueue = new Set();
   const panelEl = document.getElementById('workspaceProcessingPanel');
   const listEl = null;
   const btnStopAll = null;
@@ -372,25 +362,6 @@ function fmtTs($ts): string {
       }
     }
   }
-  // Única condición: la siguiente petición solo se inicia cuando la anterior haya finalizado (éxito, error o complete).
-  async function runClassifyLoopMain(ws) {
-    while (classifyQueue.has(ws) && !mainThreadStopRequested) {
-      const url = apiUrlWs('procesar_imagenes', ws);
-      const { ok, data } = await getJson(url);
-      if (!ok || !data?.success || !classifyQueue.has(ws)) break;
-      // Si hubo error del clasificador, la imagen ya quedó marcada como error; continuar con la siguiente.
-      if (data?.stopped_due_to_classifier_error) continue;
-      const pending = data?.pendientes ?? data?.pending ?? 0;
-      const total = data?.total ?? 0;
-      const procesadas = data?.procesadas ?? 0;
-      if (pending === 0 || (total > 0 && procesadas >= total)) {
-        classifyQueue.delete(ws);
-        updateProcessingPanel();
-        break;
-      }
-    }
-  }
-
   function apiUrlWs(action, workspace) {
     return apiUrl(action, { workspace });
   }
@@ -398,10 +369,9 @@ function fmtTs($ts): string {
   function syncQueuesFromState(state) {
     if (!state) return;
     if (Array.isArray(state.download)) { downloadQueue.clear(); state.download.forEach((ws) => downloadQueue.add(ws)); }
-    if (Array.isArray(state.classify)) { classifyQueue.clear(); state.classify.forEach((ws) => classifyQueue.add(ws)); }
   }
 
-  const lastButtonMetrics = {}; // ws -> { descargar: string, clasificar: string }
+  const lastButtonMetrics = {}; // ws -> { descargar: string }
 
   function setButtonProcessing(btn, type, metricsText) {
     if (!btn) return;
@@ -418,7 +388,6 @@ function fmtTs($ts): string {
     btn.disabled = false;
     btn.classList.remove('ws-btn-processing');
     if (type === 'descargar') btn.innerHTML = '<i class="fas fa-download"></i> Descargar';
-    else btn.innerHTML = '<i class="fas fa-robot"></i> Clasificar';
     const stopWrap = btn.nextElementSibling;
     if (stopWrap && stopWrap.classList.contains('ws-btn-stop-wrap')) stopWrap.remove();
   }
@@ -431,15 +400,6 @@ function fmtTs($ts): string {
         setButtonProcessing(btn, 'descargar', metrics);
       } else {
         setButtonIdle(btn, 'descargar');
-      }
-    });
-    document.querySelectorAll('.btnWsClasificar[data-ws]').forEach((btn) => {
-      const ws = btn.getAttribute('data-ws');
-      if (classifyQueue.has(ws)) {
-        const metrics = (lastButtonMetrics[ws] && lastButtonMetrics[ws].clasificar) || '';
-        setButtonProcessing(btn, 'clasificar', metrics);
-      } else {
-        setButtonIdle(btn, 'clasificar');
       }
     });
   }
@@ -458,34 +418,16 @@ function fmtTs($ts): string {
     };
   }
 
-  async function fetchStatsClasificacion(ws) {
-    const { ok, data } = await getJson(apiUrlWs('estadisticas_clasificacion', ws));
-    if (!ok || !data?.success || !data?.stats) return null;
-    const s = data.stats;
-    return {
-      type: 'clasificar',
-      total: Number(s.total ?? 0),
-      procesadas: Number(s.procesadas ?? 0),
-      pendientes: Number(s.pendientes ?? 0),
-      pendientes_deteccion: Number(s.pendientes_deteccion ?? 0),
-      detections_total: Number(s.detections_total ?? 0),
-      safe: Number(s.safe ?? 0),
-      unsafe: Number(s.unsafe ?? 0)
-    };
-  }
-
   function updateCardStats(ws, statsClasificacion) {
     if (!statsClasificacion) return;
     const container = document.querySelector(`.ws-card-stats[data-ws="${ws}"]`);
     if (!container) return;
     const imgEl = container.querySelector('.ws-stat-num[data-stat="images"]');
     const pendEl = container.querySelector('.ws-stat-num[data-stat="pending"]');
-    const detEl = container.querySelector('.ws-stat-num[data-stat="detections"]');
     const erroresHintEl = container.querySelector('.ws-stat-errores-hint');
     const erroresNumEl = container.querySelector('.ws-stat-num[data-stat="errores"]');
     if (statsClasificacion.total !== undefined && imgEl) imgEl.textContent = Number(statsClasificacion.total).toLocaleString();
     if ((statsClasificacion.pendientes_deteccion !== undefined || statsClasificacion.pendientes !== undefined) && pendEl) pendEl.textContent = Number(statsClasificacion.pendientes_deteccion ?? statsClasificacion.pendientes ?? 0).toLocaleString();
-    if (statsClasificacion.detections_total !== undefined && detEl) detEl.textContent = Number(statsClasificacion.detections_total).toLocaleString();
     if (erroresHintEl && erroresNumEl) {
       const errores = Number(statsClasificacion.errores ?? 0);
       erroresNumEl.textContent = errores.toLocaleString();
@@ -497,10 +439,6 @@ function fmtTs($ts): string {
     if (type === 'descargar') {
       const n = extra?.imagenes_totales ?? 0;
       return `Imágenes: ${Number(n).toLocaleString()}`;
-    }
-    if (type === 'clasificar') {
-      const n = stats?.pendientes_deteccion ?? stats?.pendientes ?? 0;
-      return `Pendientes: ${Number(n).toLocaleString()}`;
     }
     return '—';
   }
@@ -517,30 +455,16 @@ function fmtTs($ts): string {
 
   function applyTickToPanel(msg) {
     const { mode, ws, data } = msg;
-    if (!data || !ws) return;
-    const type = mode === 'download' ? 'descargar' : 'clasificar';
-    if (mode === 'download') {
-      if (typeof data.pendientes === 'number') {
-        const registrosEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="registros-descarga"]');
-        if (registrosEl) registrosEl.textContent = Number(data.pendientes).toLocaleString();
-      }
-      const stats = data?.clasificacion_stats;
-      const imagenes = stats && (typeof stats.total === 'number') ? stats.total : null;
-      const metricsText = formatMetrics(type, null, { imagenes_totales: imagenes ?? 0 });
-      updateButtonMetricsLabel(ws, type, metricsText);
-      if (stats) updateCardStats(ws, { total: stats.total, pendientes: stats.pendientes, pendientes_deteccion: stats.pendientes_deteccion ?? stats.pendientes, detections_total: stats.detections_total });
-    } else {
-      const pendientes = data?.pendientes ?? data?.pendientes_deteccion ?? data?.pending ?? 0;
-      const metricsText = formatMetrics(type, { pendientes_deteccion: pendientes, pendientes });
-      updateButtonMetricsLabel(ws, type, metricsText);
-      updateCardStats(ws, {
-        total: data?.stats?.total ?? data?.total,
-        pendientes: data?.pendientes,
-        pendientes_deteccion: data?.pendientes_deteccion ?? data?.pendientes,
-        detections_total: data?.detections_total,
-        errores: data?.stats_deteccion?.errores
-      });
+    if (!data || !ws || mode !== 'download') return;
+    if (typeof data.pendientes === 'number') {
+      const registrosEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="registros-descarga"]');
+      if (registrosEl) registrosEl.textContent = Number(data.pendientes).toLocaleString();
     }
+    const stats = data?.clasificacion_stats;
+    const imagenes = stats && (typeof stats.total === 'number') ? stats.total : null;
+    const metricsText = formatMetrics('descargar', null, { imagenes_totales: imagenes ?? 0 });
+    updateButtonMetricsLabel(ws, 'descargar', metricsText);
+    if (stats) updateCardStats(ws, { total: stats.total, pendientes: stats.pendientes, pendientes_deteccion: stats.pendientes_deteccion ?? stats.pendientes });
   }
 
   if (worker) {
@@ -551,7 +475,6 @@ function fmtTs($ts): string {
         updateProcessingPanel();
       } else if (msg?.type === 'done') {
         if (msg.mode === 'download') downloadQueue.delete(msg.ws);
-        else classifyQueue.delete(msg.ws);
         updateProcessingPanel();
       } else if (msg?.type === 'tick') {
         applyTickToPanel(msg);
@@ -575,23 +498,6 @@ function fmtTs($ts): string {
       else { mainThreadStopRequested = false; runDownloadLoopMain(ws); }
     });
   });
-  document.querySelectorAll('.btnWsClasificar[data-ws]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const ws = btn.getAttribute('data-ws');
-      if (!ws) return;
-      if (classifyQueue.has(ws)) {
-        classifyQueue.delete(ws);
-        if (worker) worker.postMessage({ type: 'remove', mode: 'classify', ws });
-        updateProcessingPanel();
-        return;
-      }
-      classifyQueue.add(ws);
-      updateProcessingPanel();
-      if (worker) worker.postMessage({ type: 'add', mode: 'classify', ws });
-      else { mainThreadStopRequested = false; runClassifyLoopMain(ws); }
-    });
-  });
-
   // Detener todos: ya no hay barra global; cada botón tiene su "Detener"
 
   async function abrirWorkspace(slug) {
@@ -1035,7 +941,6 @@ function fmtTs($ts): string {
       }
     });
 
-    loadEtiquetasGlobal();
   }
 
   // Toggle colapso del buscador (derecha)

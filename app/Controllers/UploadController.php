@@ -144,7 +144,7 @@ class UploadController extends BaseController
             $pdo = AppConnection::get();
             AppSchema::ensure($pdo);
             $tImg = AppConnection::table('images');
-            $stmtMd5 = $pdo->prepare("SELECT ruta_relativa FROM {$tImg} WHERE content_md5 = :m LIMIT 1");
+            $stmtMd5 = $pdo->prepare("SELECT relative_path FROM {$tImg} WHERE content_md5 = :m LIMIT 1");
 
             $savedPaths = [];
 

@@ -34,6 +34,27 @@ class CarpetasController extends BaseController
         return is_dir($dir);
     }
 
+    /**
+     * Valida que la ruta objetivo esté bajo el directorio base (evita path traversal y symlinks).
+     * Devuelve true si es segura; si no, establece el código HTTP apropiado y devuelve false.
+     */
+    private function ensurePathUnderBase(string $targetPath, string $basePath): bool
+    {
+        $baseReal = realpath($basePath);
+        $targetReal = realpath($targetPath);
+        if ($baseReal === false || $targetReal === false) {
+            http_response_code(404);
+            return false;
+        }
+        $baseNorm = rtrim(str_replace('\\', '/', $baseReal), '/');
+        $targetNorm = str_replace('\\', '/', $targetReal);
+        if ($targetNorm !== $baseNorm && strpos($targetNorm, $baseNorm . '/') !== 0) {
+            http_response_code(403);
+            return false;
+        }
+        return true;
+    }
+
     private function loadImageResource(string $path, ?string &$mime = null, ?array &$size = null)
     {
         $mime = null;
@@ -107,6 +128,9 @@ class CarpetasController extends BaseController
         exit;
     }
 
+    /** Tamaño de chunk para IN (folder_path) y evitar límite de placeholders. */
+    private const ENRIQUECER_TAGS_CHUNK_SIZE = 100;
+
     private function enriquecerCarpetasConTags(array $carpetas): array
     {
         if (empty($carpetas)) return $carpetas;
@@ -124,105 +148,32 @@ class CarpetasController extends BaseController
         $pdo = AppConnection::get();
         AppSchema::ensure($pdo);
         $tImg = AppConnection::table('images');
-        $tDet = AppConnection::table('detections');
+        $ws = WorkspaceService::current() ?? '';
 
-        $ph = implode(',', array_fill(0, count($rutas), '?'));
-
-        // Imágenes: ruta_relativa, ruta_carpeta para las carpetas
-        $stmtImg = $pdo->prepare("
-            SELECT ruta_relativa, ruta_carpeta
-            FROM {$tImg}
-            WHERE COALESCE(ruta_carpeta,'') IN ($ph)
-        ");
-        $stmtImg->execute($rutas);
-        $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        $rutaToCarpeta = [];
-        $rutaRelativas = [];
         $totalByRuta = [];
-        foreach ($imgRows as $r) {
-            $rrel = (string)($r['ruta_relativa'] ?? '');
-            $rc = (string)($r['ruta_carpeta'] ?? '');
-            if ($rc !== '') {
-                $totalByRuta[$rc] = ($totalByRuta[$rc] ?? 0) + 1;
-            }
-            if ($rrel !== '') {
-                $rutaToCarpeta[$rrel] = $rc;
-                $rutaRelativas[] = $rrel;
-            }
-        }
-
-        $tagsByRuta = []; // ruta => [label => count] (count = imágenes distintas por label)
-        if (!empty($rutaRelativas)) {
-            $ph2 = implode(',', array_fill(0, count($rutaRelativas), '?'));
-            $stmtDet = $pdo->prepare("
-                SELECT image_ruta_relativa, label
-                FROM {$tDet}
-                WHERE image_ruta_relativa IN ($ph2)
+        $chunks = array_chunk($rutas, self::ENRIQUECER_TAGS_CHUNK_SIZE);
+        foreach ($chunks as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            $stmtImg = $pdo->prepare("
+                SELECT relative_path, folder_path
+                FROM {$tImg}
+                WHERE workspace_slug = ? AND COALESCE(folder_path,'') IN ($ph)
             ");
-            $stmtDet->execute($rutaRelativas);
-            $detRows = $stmtDet->fetchAll(PDO::FETCH_ASSOC) ?: [];
-            $byRutaLabel = []; // clave "ruta\0label" => set de image_ruta_relativa
-            foreach ($detRows as $dr) {
-                $rrel = (string)($dr['image_ruta_relativa'] ?? '');
-                $lab = isset($dr['label']) ? strtoupper(trim((string)$dr['label'])) : '';
-                if ($rrel === '' || $lab === '') continue;
-                $rc = $rutaToCarpeta[$rrel] ?? null;
-                if ($rc === null) continue;
-                $key = $rc . "\0" . $lab;
-                if (!isset($byRutaLabel[$key])) $byRutaLabel[$key] = [];
-                $byRutaLabel[$key][$rrel] = true;
-            }
-            foreach ($byRutaLabel as $key => $set) {
-                $parts = explode("\0", $key, 2);
-                $rc = $parts[0] ?? '';
-                $lab = $parts[1] ?? '';
-                if ($rc === '' || $lab === '') continue;
-                if (!isset($tagsByRuta[$rc])) $tagsByRuta[$rc] = [];
-                $tagsByRuta[$rc][$lab] = (int)count($set);
+            $stmtImg->execute(array_merge([$ws], $chunk));
+            $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($imgRows as $r) {
+                $rc = (string)($r['folder_path'] ?? '');
+                if ($rc !== '') {
+                    $totalByRuta[$rc] = ($totalByRuta[$rc] ?? 0) + 1;
+                }
             }
         }
 
-        // Pendientes por carpeta
-        $stmtPend = $pdo->prepare("
-            SELECT i.ruta_carpeta as ruta, COUNT(*) as c
-            FROM {$tImg} i
-            WHERE COALESCE(i.ruta_carpeta,'') IN ($ph)
-              AND (
-                COALESCE(i.detect_estado,'') <> 'ok'
-                OR COALESCE(i.clasif_estado,'') = 'pending'
-              )
-            GROUP BY i.ruta_carpeta
-        ");
-        $stmtPend->execute($rutas);
-        $rowsPend = $stmtPend->fetchAll() ?: [];
-        $pendByRuta = [];
-        foreach ($rowsPend as $r) {
-            $ruta = (string)($r['ruta'] ?? '');
-            $cnt = (int)($r['c'] ?? 0);
-            if ($ruta === '') continue;
-            $pendByRuta[$ruta] = $cnt;
-        }
-
-        // Adjuntar a cada carpeta
         $out = [];
         foreach ($carpetas as $c) {
             if (!is_array($c)) continue;
             $ruta = (string)($c['ruta'] ?? '');
-            $tagsMap = $tagsByRuta[$ruta] ?? [];
-            $tagsList = [];
-            foreach ($tagsMap as $lab => $cnt) {
-                $tagsList[] = ['label' => $lab, 'count' => (int)$cnt];
-            }
-            usort($tagsList, function ($a, $b) {
-                $ca = (int)($a['count'] ?? 0);
-                $cb = (int)($b['count'] ?? 0);
-                if ($ca !== $cb) return $cb <=> $ca;
-                return strcmp((string)($a['label'] ?? ''), (string)($b['label'] ?? ''));
-            });
-            // limitar para UI
-            $tagsList = array_slice($tagsList, 0, 12);
-
-            $c['pendientes'] = (int)($pendByRuta[$ruta] ?? 0);
+            $c['pendientes'] = 0;
             $totalReal = (int)($totalByRuta[$ruta] ?? $c['total_archivos'] ?? $c['total_imagenes'] ?? 0);
             if (array_key_exists('total_archivos', $c)) {
                 $c['total_archivos'] = $totalReal;
@@ -230,7 +181,7 @@ class CarpetasController extends BaseController
             if (array_key_exists('total_imagenes', $c)) {
                 $c['total_imagenes'] = $totalReal;
             }
-            $c['tags'] = $tagsList;
+            $c['tags'] = [];
             $out[] = $c;
         }
 
@@ -239,177 +190,15 @@ class CarpetasController extends BaseController
     }
 
     /**
-     * Para cada carpeta obtiene la primera imagen con FACE_FEMALE o FACE_MALE (en ese orden)
-     * y genera/cachea un avatar (recorte cuadrado del bbox, redimensionado).
-     * Si se pasa $slug y $pdo se usa ese workspace; si no, el actual.
+     * Sin clasificación/detecciones ya no se generan avatares por cara; se deja avatar_url en null.
      */
     public function enriquecerCarpetasConAvataresParaWorkspace(string $slug, array $carpetas, PDO $pdo): array
     {
         if (empty($carpetas)) return $carpetas;
-
-        WorkspaceService::ensureStructure($slug);
-        $paths = WorkspaceService::paths($slug);
-        $imagesDir = $paths['imagesDir'] ?? '';
-        $avatarsDir = $paths['avatarsDir'] ?? '';
-        if ($imagesDir === '' || $avatarsDir === '') return $carpetas;
-        $this->ensureDir($avatarsDir);
-
-        $rutas = [];
-        foreach ($carpetas as $c) {
-            if (!is_array($c)) continue;
-            $r = (string)($c['ruta'] ?? '');
-            if ($r !== '') $rutas[] = $r;
-        }
-        $rutas = array_values(array_unique($rutas));
-        if (empty($rutas)) return $carpetas;
-
-        $ph = implode(',', array_fill(0, count($rutas), '?'));
-        $tImg = AppConnection::table('images');
-        $tDet = AppConnection::table('detections');
-
-        $stmt = $pdo->prepare("
-            SELECT i.ruta_carpeta AS ruta, d.image_ruta_relativa AS img, d.label AS label, d.score AS score, d.x1, d.y1, d.x2, d.y2
-            FROM {$tImg} i
-            JOIN {$tDet} d ON d.workspace_slug = i.workspace_slug AND d.image_ruta_relativa = i.ruta_relativa
-            WHERE i.workspace_slug = ? AND i.ruta_carpeta IN ($ph) AND d.label IN ('FACE_FEMALE', 'FACE_MALE', 'FEMALE_BREAST_EXPOSED', 'FEMALE_BREAST_COVERED')
-              AND d.x1 IS NOT NULL AND d.y1 IS NOT NULL AND d.x2 IS NOT NULL AND d.y2 IS NOT NULL
-            ORDER BY i.ruta_carpeta, d.score DESC, (d.x2 - d.x1) * (d.y2 - d.y1) DESC,
-              CASE d.label WHEN 'FACE_FEMALE' THEN 0 WHEN 'FACE_MALE' THEN 1 WHEN 'FEMALE_BREAST_EXPOSED' THEN 2 WHEN 'FEMALE_BREAST_COVERED' THEN 3 ELSE 4 END,
-              i.ruta_relativa
-        ");
-        $stmt->execute(array_merge([$slug], $rutas));
-        $rows = $stmt->fetchAll() ?: [];
-
-        $firstByRuta = [];
-        foreach ($rows as $r) {
-            $ruta = (string)($r['ruta'] ?? '');
-            if ($ruta === '' || isset($firstByRuta[$ruta])) continue;
-            $x1 = isset($r['x1']) ? (int)$r['x1'] : 0;
-            $y1 = isset($r['y1']) ? (int)$r['y1'] : 0;
-            $x2 = isset($r['x2']) ? (int)$r['x2'] : 0;
-            $y2 = isset($r['y2']) ? (int)$r['y2'] : 0;
-            if ($x2 <= $x1 || $y2 <= $y1) continue;
-            $score = isset($r['score']) ? (float)$r['score'] : 0.0;
-            $firstByRuta[$ruta] = [
-                'image_ruta_relativa' => (string)($r['img'] ?? ''),
-                'label' => (string)($r['label'] ?? ''),
-                'score' => $score,
-                'x1' => $x1, 'y1' => $y1, 'x2' => $x2, 'y2' => $y2
-            ];
-        }
-
-        $avatarSize = 64;
         foreach ($carpetas as &$c) {
-            $ruta = (string)($c['ruta'] ?? '');
             $c['avatar_url'] = null;
-            $face = $firstByRuta[$ruta] ?? null;
-            if ($face === null || $face['image_ruta_relativa'] === '') continue;
-
-            $key = sha1($ruta);
-            $cachePath = $avatarsDir . DIRECTORY_SEPARATOR . $key . '.jpg';
-            $metaPath = $avatarsDir . DIRECTORY_SEPARATOR . $key . '.meta';
-            $useCached = false;
-            if (is_file($cachePath)) {
-                if (is_file($metaPath)) {
-                    $metaContent = @file_get_contents($metaPath);
-                    if ($metaContent !== false) {
-                        $lines = explode("\n", trim($metaContent), 3);
-                        $cachedImg = isset($lines[0]) ? trim($lines[0]) : '';
-                        $cachedScore = isset($lines[1]) ? trim($lines[1]) : '';
-                        $cachedLabel = isset($lines[2]) ? trim($lines[2]) : '';
-                        $currentScoreStr = (string)$face['score'];
-                        $currentLabel = (string)($face['label'] ?? '');
-                        if ($cachedImg === $face['image_ruta_relativa'] && $cachedScore === $currentScoreStr && $cachedLabel === $currentLabel) {
-                            $useCached = true;
-                        }
-                    }
-                }
-                if ($useCached) {
-                    $c['avatar_url'] = '?action=ver_avatar&workspace=' . rawurlencode($slug) . '&k=' . urlencode($key);
-                    continue;
-                }
-                @unlink($cachePath);
-                @unlink($metaPath);
-            }
-
-            $imagePath = $imagesDir . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $face['image_ruta_relativa']);
-            if (!is_file($imagePath)) continue;
-
-            $mimeIn = null;
-            $sizeIn = null;
-            $im = $this->loadImageResource($imagePath, $mimeIn, $sizeIn);
-            if (!$im) continue;
-
-            $imgW = imagesx($im);
-            $imgH = imagesy($im);
-            if ($imgW <= 0 || $imgH <= 0) {
-                imagedestroy($im);
-                continue;
-            }
-
-            $x1 = max(0, min($face['x1'], $imgW - 1));
-            $y1 = max(0, min($face['y1'], $imgH - 1));
-            $x2 = max(0, min($face['x2'], $imgW));
-            $y2 = max(0, min($face['y2'], $imgH));
-            if ($x2 <= $x1) $x2 = $x1 + 1;
-            if ($y2 <= $y1) $y2 = $y1 + 1;
-
-            $w = $x2 - $x1;
-            $h = $y2 - $y1;
-            $side = max($w, $h);
-            $cx = (int)(($x1 + $x2) / 2);
-            $cy = (int)(($y1 + $y2) / 2);
-            $label = (string)($face['label'] ?? '');
-            if ($label === 'FEMALE_BREAST_EXPOSED' || $label === 'FEMALE_BREAST_COVERED') {
-                $cy = (int)($cy - $side * 0.5);
-            }
-            $half = (int)($side / 2);
-            $sx1 = $cx - $half;
-            $sy1 = $cy - $half;
-            $sx2 = $cx + $half;
-            $sy2 = $cy + $half;
-            if ($sx1 < 0) { $sx2 -= $sx1; $sx1 = 0; }
-            if ($sy1 < 0) { $sy2 -= $sy1; $sy1 = 0; }
-            if ($sx2 > $imgW) { $sx1 -= ($sx2 - $imgW); $sx2 = $imgW; }
-            if ($sy2 > $imgH) { $sy1 -= ($sy2 - $imgH); $sy2 = $imgH; }
-            $sx1 = max(0, $sx1);
-            $sy1 = max(0, $sy1);
-            $sx2 = min($imgW, $sx2);
-            $sy2 = min($imgH, $sy2);
-            $sw = $sx2 - $sx1;
-            $sh = $sy2 - $sy1;
-            if ($sw <= 0 || $sh <= 0) {
-                imagedestroy($im);
-                continue;
-            }
-
-            if (!function_exists('imagecreatetruecolor') || !function_exists('imagecopyresampled')) {
-                imagedestroy($im);
-                continue;
-            }
-
-            $dst = imagecreatetruecolor($avatarSize, $avatarSize);
-            if (!$dst) {
-                imagedestroy($im);
-                continue;
-            }
-            imagecopyresampled($dst, $im, 0, 0, $sx1, $sy1, $avatarSize, $avatarSize, $sw, $sh);
-            imagedestroy($im);
-
-            $tmpPath = $cachePath . '.tmp';
-            $ok = @imagejpeg($dst, $tmpPath, 85);
-            imagedestroy($dst);
-            if ($ok && is_file($tmpPath)) {
-                @rename($tmpPath, $cachePath);
-                $metaContent = $face['image_ruta_relativa'] . "\n" . (string)$face['score'] . "\n" . (string)($face['label'] ?? '');
-                @file_put_contents($metaPath, $metaContent);
-                $c['avatar_url'] = '?action=ver_avatar&workspace=' . rawurlencode($slug) . '&k=' . urlencode($key);
-            } else {
-                @unlink($tmpPath);
-            }
         }
         unset($c);
-
         return $carpetas;
     }
 
@@ -541,6 +330,10 @@ class CarpetasController extends BaseController
             }
             
             $rutaCompleta = $directorioBase . '/' . $ruta;
+
+            if (!$this->ensurePathUnderBase($rutaCompleta, $directorioBase)) {
+                $this->jsonResponse(['success' => false, 'error' => 'Ruta inválida'], 403);
+            }
             
             // Verificar que el directorio existe
             if (!is_dir($rutaCompleta)) {
@@ -550,86 +343,44 @@ class CarpetasController extends BaseController
                 ], 404);
             }
             
-            // --- Lookup estado + tags por imagen de esta carpeta (2 consultas sin JOIN) ---
             $pdo = AppConnection::get();
             AppSchema::ensure($pdo);
             $tImg = AppConnection::table('images');
-            $tDet = AppConnection::table('detections');
 
             $rutaNorm = str_replace('\\', '/', (string)$ruta);
             $rutaNorm = trim($rutaNorm, '/');
 
             $stmtImg = $pdo->prepare("
-                SELECT ruta_relativa, archivo, clasif_estado, detect_estado, ruta_completa
+                SELECT relative_path, filename, full_path
                 FROM {$tImg}
-                WHERE workspace_slug = :ws AND COALESCE(ruta_carpeta,'') = :rc
+                WHERE workspace_slug = :ws AND COALESCE(folder_path,'') = :rc
             ");
             $stmtImg->execute([':ws' => $ws, ':rc' => $rutaNorm]);
             $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-            $byArchivo = [];
-            $rutaRelativas = [];
-            foreach ($imgRows as $r) {
-                $archivo = (string)($r['archivo'] ?? '');
-                if ($archivo === '') continue;
-                $rrel = (string)($r['ruta_relativa'] ?? '');
-                $clas = (string)($r['clasif_estado'] ?? '');
-                $det = (string)($r['detect_estado'] ?? '');
-                $pend = ($det !== 'ok') || ($clas === 'pending');
-                $byArchivo[$archivo] = [
-                    'ruta_relativa' => $rrel,
-                    'ruta_completa' => $r['ruta_completa'] ?? null,
-                    'pendiente' => $pend,
-                    'tagsMap' => []
-                ];
-                if ($rrel !== '') $rutaRelativas[] = $rrel;
-            }
-
-            if (!empty($rutaRelativas)) {
-                $ph = implode(',', array_fill(0, count($rutaRelativas), '?'));
-                $stmtDet = $pdo->prepare("
-                    SELECT image_ruta_relativa, label
-                    FROM {$tDet}
-                    WHERE workspace_slug = ? AND image_ruta_relativa IN ($ph)
-                ");
-                $stmtDet->execute(array_merge([$ws], $rutaRelativas));
-                $detRows = $stmtDet->fetchAll(PDO::FETCH_ASSOC) ?: [];
-                $rutaToArchivo = [];
-                foreach ($byArchivo as $arch => $data) {
-                    $rutaToArchivo[(string)$data['ruta_relativa']] = $arch;
-                }
-                foreach ($detRows as $dr) {
-                    $rrel = (string)($dr['image_ruta_relativa'] ?? '');
-                    $lab = isset($dr['label']) ? strtoupper(trim((string)$dr['label'])) : '';
-                    if ($lab === '' || $rrel === '') continue;
-                    $arch = $rutaToArchivo[$rrel] ?? null;
-                    if ($arch !== null) {
-                        $byArchivo[$arch]['tagsMap'][$lab] = true;
-                    }
-                }
-            }
-
-            // Listado solo desde BD (tabla images) para esta carpeta
             $archivosInfo = [];
             $extensionesImagen = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'avif', 'heic', 'heif', 'ico', 'svg'];
 
-            foreach ($byArchivo as $archivo => $data) {
-                $extension = strtolower(pathinfo($archivo, PATHINFO_EXTENSION));
-                $esImagen = in_array($extension, $extensionesImagen);
-                $rutaCompletaArchivo = $data['ruta_completa'] ?? null;
+            foreach ($imgRows as $r) {
+                $archivo = (string)($r['filename'] ?? '');
+                if ($archivo === '') continue;
+                $rrel = (string)($r['relative_path'] ?? '');
+                $rutaCompletaArchivo = $r['full_path'] ?? null;
                 $tamano = 0;
                 if ($rutaCompletaArchivo !== null && $rutaCompletaArchivo !== '' && is_file($rutaCompletaArchivo)) {
                     $tamano = (int)@filesize($rutaCompletaArchivo);
                 }
+                $extension = strtolower(pathinfo($archivo, PATHINFO_EXTENSION));
+                $esImagen = in_array($extension, $extensionesImagen);
 
                 $archivosInfo[] = [
                     'nombre' => $archivo,
                     'es_imagen' => $esImagen,
                     'extension' => $extension,
                     'tamano' => $tamano,
-                    'ruta_relativa' => $data['ruta_relativa'],
-                    'pendiente' => (bool)$data['pendiente'],
-                    'tags' => array_keys($data['tagsMap'])
+                    'ruta_relativa' => $rrel,
+                    'pendiente' => false,
+                    'tags' => []
                 ];
             }
 
@@ -677,6 +428,11 @@ class CarpetasController extends BaseController
             }
             
             $rutaCompleta = $directorioBase . '/' . $ruta . '/' . $archivo;
+
+            if (!$this->ensurePathUnderBase($rutaCompleta, $directorioBase)) {
+                http_response_code(403);
+                die('Ruta inválida');
+            }
             
             // Verificar que el archivo existe
             if (!file_exists($rutaCompleta) || !is_file($rutaCompleta)) {
@@ -691,12 +447,29 @@ class CarpetasController extends BaseController
                 $w = (int)($_GET['w'] ?? 120);
                 $w = max(40, min(400, $w));
 
-                // Cache key basado en path+mtime+size+w+version
+                // Cache key: path+mtime+size+w+content_md5 (si está en índice) para invalidar solo cuando cambie contenido
                 $real = realpath($rutaCompleta) ?: $rutaCompleta;
                 $st = @stat($real) ?: null;
                 $mtime = is_array($st) ? (int)($st['mtime'] ?? 0) : 0;
                 $size = is_array($st) ? (int)($st['size'] ?? 0) : 0;
-                $key = sha1($real . '|' . $mtime . '|' . $size . '|' . $w . '|thumb_v1');
+                $contentMd5 = null;
+                try {
+                    $rutaRelativa = str_replace('\\', '/', trim($ruta, "/\\") . '/' . trim($archivo, "/\\"));
+                    $rutaRelativa = preg_replace('#/+#', '/', $rutaRelativa);
+                    $pdoThumb = AppConnection::get();
+                    AppSchema::ensure($pdoThumb);
+                    $tImg = AppConnection::table('images');
+                    $wsThumb = \App\Services\WorkspaceService::current() ?? '';
+                    $stmtMd5 = $pdoThumb->prepare("SELECT content_md5 FROM {$tImg} WHERE workspace_slug = :ws AND relative_path = :k LIMIT 1");
+                    $stmtMd5->execute([':ws' => $wsThumb, ':k' => $rutaRelativa]);
+                    $row = $stmtMd5->fetch(\PDO::FETCH_ASSOC);
+                    if (!empty($row['content_md5']) && strlen($row['content_md5']) === 32) {
+                        $contentMd5 = $row['content_md5'];
+                    }
+                } catch (\Throwable $e) {
+                    // Ignorar: seguir con key sin content_md5
+                }
+                $key = sha1($real . '|' . $mtime . '|' . $size . '|' . $w . '|' . ($contentMd5 ?? '') . '|thumb_v1');
 
                 $paths = WorkspaceService::paths($ws);
                 $thumbsDir = $paths['thumbsDir'] ?? $this->workspacePath('thumbs');
@@ -942,6 +715,10 @@ class CarpetasController extends BaseController
         if (!is_file($path)) {
             http_response_code(404);
             die('Avatar no encontrado');
+        }
+        if (!$this->ensurePathUnderBase($path, $avatarsDir)) {
+            http_response_code(403);
+            die('Ruta inválida');
         }
         header('Content-Type: image/jpeg');
         header('Cache-Control: public, max-age=31536000, immutable');

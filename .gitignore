@@ -16,10 +16,11 @@
 .DS_Store
 Thumbs.db
 
-# Configuración local (si se usa en el futuro)
+# Configuración local y credenciales
 .env
 .env.local
 .env.*.local
+config/mysql_app.json
 
 # PHP
 .phpunit.result.cache

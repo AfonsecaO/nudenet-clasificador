@@ -45,16 +45,6 @@ return [
         'method' => 'buscarCarpetasConsolidado',
         'type' => 'api'
     ],
-    'etiquetas_detectadas_global' => [
-        'controller' => 'WorkspaceController',
-        'method' => 'etiquetasDetectadasConsolidado',
-        'type' => 'api'
-    ],
-    'buscar_imagenes_etiquetas_global' => [
-        'controller' => 'WorkspaceController',
-        'method' => 'buscarImagenesEtiquetasConsolidado',
-        'type' => 'api'
-    ],
     'workspace_global_config' => [
         'controller' => 'WorkspaceController',
         'method' => 'globalConfig',
@@ -76,39 +66,14 @@ return [
         'method' => 'procesar',
         'type' => 'api'
     ],
-    'procesar_imagenes' => [
-        'controller' => 'ImagenesController',
-        'method' => 'procesarSiguiente',
-        'type' => 'api'
-    ],
-    'estadisticas_clasificacion' => [
-        'controller' => 'ImagenesController',
-        'method' => 'estadisticas',
-        'type' => 'api'
-    ],
     'estadisticas_descarga' => [
         'controller' => 'ProcesarController',
         'method' => 'estadisticasDescarga',
         'type' => 'api'
     ],
-    'etiquetas_detectadas' => [
-        'controller' => 'ImagenesController',
-        'method' => 'etiquetasDetectadas',
-        'type' => 'api'
-    ],
-    'buscar_imagenes_etiquetas' => [
-        'controller' => 'ImagenesController',
-        'method' => 'buscarPorEtiquetas',
-        'type' => 'api'
-    ],
     'reindex_imagenes' => [
         'controller' => 'ImagenesController',
         'method' => 'reindexDesdeFilesystem',
-        'type' => 'api'
-    ],
-    'reset_clasificacion' => [
-        'controller' => 'ImagenesController',
-        'method' => 'resetClasificacion',
         'type' => 'api'
     ],
     'buscar_carpetas' => [
@@ -129,11 +94,6 @@ return [
     'ver_avatar' => [
         'controller' => 'CarpetasController',
         'method' => 'verAvatar',
-        'type' => 'api'
-    ],
-    'imagen_detecciones' => [
-        'controller' => 'ImagenesController',
-        'method' => 'imagenDetecciones',
         'type' => 'api'
     ],
     'upload_imagenes' => [
@@ -178,11 +138,6 @@ return [
     'setup_test_dir' => [
         'controller' => 'SetupController',
         'method' => 'testDir',
-        'type' => 'api'
-    ],
-    'setup_test_clasificador' => [
-        'controller' => 'SetupController',
-        'method' => 'testClasificador',
         'type' => 'api'
     ],
     'setup_save' => [

@@ -12,7 +12,9 @@ class StorageEngineController extends BaseController
             header('Location: ?action=workspace_select');
             exit;
         }
-        $this->render('storage_engine_select', []);
+        $this->render('storage_engine_select', [
+            'registros_descarga' => StorageEngineConfig::getRegistrosDescarga(),
+        ]);
     }
 
     public function save()
@@ -22,6 +24,9 @@ class StorageEngineController extends BaseController
             $driver = 'sqlite';
         }
         StorageEngineConfig::setStorageEngine($driver);
+        $n = isset($_POST['registros_descarga']) ? (int) $_POST['registros_descarga'] : 1;
+        $n = max(1, min(1000, $n));
+        StorageEngineConfig::setRegistrosDescarga($n);
         header('Location: ?action=workspace_select');
         exit;
     }

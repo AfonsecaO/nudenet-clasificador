@@ -70,7 +70,7 @@ class HomeController extends BaseController
             if (\App\Services\WorkspaceService::hasRequestOverride()) {
                 $appWorkspaceSlug = \App\Services\WorkspaceService::current();
             }
-            $autoParam = isset($_GET['auto']) && in_array($_GET['auto'], ['descargar', 'clasificar'], true) ? $_GET['auto'] : null;
+            $autoParam = isset($_GET['auto']) && $_GET['auto'] === 'descargar' ? 'descargar' : null;
 
             // Preparar datos para la vista
             $data = [

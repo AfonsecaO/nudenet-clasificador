@@ -26,7 +26,8 @@ class ProcesarController extends BaseController
                 ob_clean();
                 $this->jsonResponse([
                     'success' => false,
-                    'error' => 'Este workspace está en modo "solo imágenes". El procesamiento de tablas (MySQL) está deshabilitado.'
+                    'error' => 'Este workspace está en modo "solo imágenes". El procesamiento de tablas (MySQL) está deshabilitado.',
+                    'log_items' => LogService::tail(50),
                 ], 400);
             }
 
@@ -47,7 +48,8 @@ class ProcesarController extends BaseController
                     ob_clean();
                     $this->jsonResponse([
                         'success' => false,
-                        'error' => 'No se encontraron tablas para procesar. Revisa TABLE_PATTERN en la parametrización.'
+                        'error' => 'No se encontraron tablas para procesar. Revisa TABLE_PATTERN en la parametrización.',
+                        'log_items' => LogService::tail(50),
                     ], 400);
                 }
             }
@@ -86,13 +88,7 @@ class ProcesarController extends BaseController
             $registroId = null;
             $clasificacionStats = null;
 
-            $limiteRegistros = 1;
-            try {
-                $n = (int) \App\Services\ConfigService::obtenerOpcional('MATERIALIZAR_REGISTROS_POR_PETICION', '1');
-                $limiteRegistros = max(1, min(5, $n));
-            } catch (\Throwable $e) {
-                $limiteRegistros = 1;
-            }
+            $limiteRegistros = \App\Services\StorageEngineConfig::getRegistrosDescarga();
 
             $procesadosEnPeticion = 0;
             while ($procesadosEnPeticion < $limiteRegistros) {
@@ -180,6 +176,12 @@ class ProcesarController extends BaseController
                         'message' => $mensaje,
                     ]);
 
+                    $estadoTracker->actualizarUltimoId(
+                        $tablaProcesada,
+                        $registroId,
+                        $resultadoRegistro['faltan_registros'] ?? true
+                    );
+
                     $procesadosEnPeticion++;
                     $estadoTracker->recargarEstado();
                     if ($procesadosEnPeticion >= $limiteRegistros) {
@@ -205,6 +207,9 @@ class ProcesarController extends BaseController
             // Limpiar cualquier output inesperado antes de enviar JSON
             ob_clean();
 
+            // Incluir log en la misma respuesta para que la UI lo pinte sin polling
+            $logItems = LogService::tail(50);
+
             $this->jsonResponse([
                 'success' => true,
                 'tabla' => $tablaProcesada,
@@ -218,16 +223,18 @@ class ProcesarController extends BaseController
                 'mensaje' => $mensaje,
                 'faltan_registros' => $tablaProcesada ? $estadoTracker->faltanRegistros($tablaProcesada) : false,
                 'estado' => $estadoProcesamiento,
-                'clasificacion_stats' => $clasificacionStats
+                'clasificacion_stats' => $clasificacionStats,
+                'log_items' => $logItems,
             ]);
             
         } catch (\Exception $e) {
             // Limpiar cualquier output inesperado antes de enviar JSON
             ob_clean();
-            
+            $logItems = LogService::tail(50);
             $this->jsonResponse([
                 'success' => false,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'log_items' => $logItems,
             ], 500);
         }
     }

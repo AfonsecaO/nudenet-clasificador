@@ -20,15 +20,6 @@ $__ws = \App\Services\WorkspaceService::current();
 $__imagesDir = $__ws ? (\App\Services\WorkspaceService::paths($__ws)['imagesDir'] ?? '') : '';
 $__wsSlug = $__ws ? (string)$__ws : '';
 
-$__ignoredCsv = (string)($values['DETECT_IGNORED_LABELS'] ?? '');
-$__ignoredSet = [];
-foreach (array_filter(array_map('trim', explode(',', $__ignoredCsv))) as $__l) {
-    $__k = \App\Services\DetectionLabels::normalizeLabel($__l);
-    if ($__k !== '') $__ignoredSet[$__k] = true;
-}
-$__officialLabels = \App\Services\DetectionLabels::officialLabels();
-$__dictEs = \App\Services\DetectionLabels::dictionaryEs();
-
 $__imgColsCsv = (string)($values['COLUMNAS_IMAGEN'] ?? '');
 $__imgColsPre = array_values(array_filter(array_map('trim', explode(',', $__imgColsCsv)), fn($x) => $x !== ''));
 $__imgColsPreJson = json_encode($__imgColsPre, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -55,7 +46,7 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
     <div class="row mb-2">
       <div class="col-sm-6">
         <h1 style="font-size:1.5rem;margin-bottom:0.25rem;">Parametrización</h1>
-        <div class="text-muted small">Asistente por workspace: DB opcional, clasificador obligatorio.</div>
+        <div class="text-muted small">Asistente por workspace: DB opcional, descarga e imágenes.</div>
       </div>
     </div>
 
@@ -254,40 +245,6 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
         <div class="row">
           <div class="col-12">
             <div class="card">
-              <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-shield-alt"></i> Clasificador</h3>
-                <span class="badge badge-secondary" id="stClasChip">Pendiente</span>
-              </div>
-              <div class="card-body">
-                <div class="form-group">
-                  <label for="CLASIFICADOR_BASE_URL">CLASIFICADOR_BASE_URL</label>
-                  <input class="form-control" id="CLASIFICADOR_BASE_URL" value="<?php echo v('CLASIFICADOR_BASE_URL',$values); ?>" placeholder="http://localhost:8001/">
-                  <small class="form-text text-muted">Se marca <span class="text-monospace">unsafe</span> si el detector devuelve cualquier etiqueta no ignorada.</small>
-                </div>
-
-                <div class="card">
-                  <div class="card-header">
-                    <h3 class="card-title"><i class="fas fa-ban"></i> Etiquetas ignoradas</h3>
-                    <span class="badge badge-info" id="ignoredCountChip">Seleccionadas: 0</span>
-                    <button class="btn btn-outline-secondary btn-sm ml-2" type="button" id="btnEditIgnored"><i class="fas fa-sliders-h"></i> Editar</button>
-                  </div>
-                  <div class="card-body">
-                    <div class="text-muted small mb-2">
-                      Selecciona etiquetas para <strong>ignorar</strong> del detector (lista negra).
-                    </div>
-                    <div id="ignoredSelectedPreview"></div>
-                  </div>
-                </div>
-
-                <button class="btn btn-primary" type="button" id="btnTestClas"><i class="fas fa-heartbeat"></i> Probar clasificador</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="col-12">
-            <div class="card">
               <div class="card-body d-flex align-items-center">
                 <span class="badge badge-secondary mr-2" id="stSaveChip">Listo</span>
                 <div class="ml-auto">
@@ -300,62 +257,16 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
       </div>
 </main>
 
-<!-- Modal: etiquetas ignoradas -->
-<div class="modal fade" id="ignoredModal" tabindex="-1" role="dialog" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="fas fa-ban"></i> Etiquetas ignoradas</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="ignoredSearch">Buscar etiqueta</label>
-          <input class="form-control" id="ignoredSearch" type="search" placeholder="Nombre o código...">
-        </div>
-        <div id="ignoredList" class="row">
-          <?php foreach ($__officialLabels as $__lab): ?>
-            <?php
-              $__code = \App\Services\DetectionLabels::normalizeLabel($__lab);
-              $__name = $__dictEs[$__code] ?? $__code;
-              $__checked = isset($__ignoredSet[$__code]);
-              $__search = strtolower($__name . ' ' . $__code);
-            ?>
-            <div class="col-12 col-md-6 ignoredItem" data-search="<?php echo htmlspecialchars($__search, ENT_QUOTES); ?>">
-              <div class="custom-control custom-checkbox">
-                <input class="custom-control-input ignoredCheck" type="checkbox" id="ig_<?php echo htmlspecialchars($__code, ENT_QUOTES); ?>" data-ignored-label="<?php echo htmlspecialchars($__code, ENT_QUOTES); ?>" <?php echo $__checked ? 'checked' : ''; ?>>
-                <label class="custom-control-label" for="ig_<?php echo htmlspecialchars($__code, ENT_QUOTES); ?>">
-                  <?php echo htmlspecialchars($__name, ENT_QUOTES); ?>
-                  <?php if ($__name !== $__code): ?>
-                    <div class="text-muted small text-monospace"><?php echo htmlspecialchars($__code, ENT_QUOTES); ?></div>
-                  <?php endif; ?>
-                </label>
-              </div>
-              <hr>
-            </div>
-          <?php endforeach; ?>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline-secondary" type="button" id="btnIgnoredClear"><i class="fas fa-eraser"></i> Limpiar</button>
-        <button class="btn btn-primary" type="button" data-dismiss="modal"><i class="fas fa-check"></i> Listo</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <script>
   const PRE_IMG_COLS = <?php echo $__imgColsPreJson ?: '[]'; ?>;
   const WS_SLUG = <?php echo json_encode(($__wsSlug ?: '<ws>'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
 
   const btnTestDb = document.getElementById('btnTestDb');
   const btnTestSchema = document.getElementById('btnTestSchema');
-  const btnTestClas = document.getElementById('btnTestClas');
   const btnSave = document.getElementById('btnSave');
 
   const stDbChip = document.getElementById('stDbChip');
   const stSchemaChip = document.getElementById('stSchemaChip');
-  const stClasChip = document.getElementById('stClasChip');
   const stSaveChip = document.getElementById('stSaveChip');
 
   const modeImagesOnly = document.getElementById('modeImagesOnly');
@@ -371,16 +282,10 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
   const patronExtHint = document.getElementById('patronExtHint');
   const btnPatronClear = document.getElementById('btnPatronClear');
 
-  const btnEditIgnored = document.getElementById('btnEditIgnored');
-  const ignoredCountChip = document.getElementById('ignoredCountChip');
-  const ignoredSelectedPreview = document.getElementById('ignoredSelectedPreview');
-  const ignoredSearch = document.getElementById('ignoredSearch');
-  const btnIgnoredClear = document.getElementById('btnIgnoredClear');
-
   const imgColsList = document.getElementById('imgColsList');
   const filtroImgCols = document.getElementById('filtroImgCols');
 
-  const okState = { db:false, schema:false, clas:false };
+  const okState = { db:false, schema:false };
 
   function getMode() {
     return (modeDbAndImages && modeDbAndImages.checked) ? 'db_and_images' : 'images_only';
@@ -398,50 +303,6 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
   function el(id) { return document.getElementById(id); }
   function getText(id) { return String(el(id)?.value || '').trim(); }
   function setDisabled(ids, disabled) { ids.forEach(id => { const x = el(id); if (x) x.disabled = !!disabled; }); }
-
-  function getIgnoredLabels() {
-    const items = [];
-    document.querySelectorAll('input.ignoredCheck[data-ignored-label]').forEach(cb => {
-      if (cb.checked) items.push(String(cb.getAttribute('data-ignored-label') || ''));
-    });
-    return items.filter(Boolean);
-  }
-
-  function updateIgnoredSummary() {
-    const selected = [];
-    document.querySelectorAll('input.ignoredCheck[data-ignored-label]').forEach(cb => {
-      if (cb.checked) {
-        const code = String(cb.getAttribute('data-ignored-label') || '');
-        const name = String(cb.parentElement?.querySelector('label')?.childNodes?.[0]?.textContent || '').trim() || code;
-        selected.push({ code, name });
-      }
-    });
-    if (ignoredCountChip) ignoredCountChip.textContent = `Seleccionadas: ${selected.length}`;
-
-    if (!ignoredSelectedPreview) return;
-    ignoredSelectedPreview.innerHTML = '';
-    if (selected.length === 0) {
-      const s = document.createElement('span');
-      s.className = 'badge badge-light';
-      s.textContent = 'Ninguna';
-      ignoredSelectedPreview.appendChild(s);
-      return;
-    }
-    const max = 12;
-    selected.slice(0, max).forEach(it => {
-      const b = document.createElement('span');
-      b.className = 'badge badge-secondary mr-1 mb-1';
-      b.title = it.code;
-      b.textContent = it.name;
-      ignoredSelectedPreview.appendChild(b);
-    });
-    if (selected.length > max) {
-      const b = document.createElement('span');
-      b.className = 'badge badge-light mr-1 mb-1';
-      b.textContent = `+${selected.length - max} más`;
-      ignoredSelectedPreview.appendChild(b);
-    }
-  }
 
   function getImgCols() {
     const items = [];
@@ -467,8 +328,6 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
       CAMPO_RESULTADO: getText('CAMPO_RESULTADO'),
       COLUMNAS_IMAGEN: getImgCols(),
       PATRON_MATERIALIZACION: getText('PATRON_MATERIALIZACION'),
-      CLASIFICADOR_BASE_URL: getText('CLASIFICADOR_BASE_URL'),
-      DETECT_IGNORED_LABELS: getIgnoredLabels(),
     };
   }
 
@@ -599,19 +458,6 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
     patronField.addEventListener('blur', () => { const p = getPatron(); if (p) setPatron(ensureExt(p)); updatePatronPreview(); });
   }
 
-  if (btnEditIgnored) btnEditIgnored.addEventListener('click', () => { if (window.jQuery) window.jQuery('#ignoredModal').modal('show'); });
-  if (btnIgnoredClear) btnIgnoredClear.addEventListener('click', () => { document.querySelectorAll('input.ignoredCheck').forEach(cb => cb.checked = false); updateIgnoredSummary(); });
-  document.querySelectorAll('input.ignoredCheck').forEach(cb => cb.addEventListener('change', updateIgnoredSummary));
-  if (ignoredSearch) {
-    ignoredSearch.addEventListener('input', () => {
-      const q = String(ignoredSearch.value || '').toLowerCase().trim();
-      document.querySelectorAll('.ignoredItem[data-search]').forEach(it => {
-        const s = String(it.getAttribute('data-search') || '');
-        it.style.display = (!q || s.includes(q)) ? '' : 'none';
-      });
-    });
-  }
-
   if (modeImagesOnly) modeImagesOnly.addEventListener('change', syncModeUI);
   if (modeDbAndImages) modeDbAndImages.addEventListener('change', syncModeUI);
 
@@ -647,14 +493,6 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
     syncModeUI();
   });
 
-  if (btnTestClas) btnTestClas.addEventListener('click', async () => {
-    setBadge(stClasChip, 'neutral', 'Probando...');
-    okState.clas = false;
-    const { ok, data } = await postJson('setup_test_clasificador', getPayload());
-    if (ok && data.ok) { okState.clas = true; await autosaveSection('clasificador'); setBadge(stClasChip,'ok','OK'); }
-    else setBadge(stClasChip,'bad', data.error || 'Error');
-  });
-
   if (btnSave) btnSave.addEventListener('click', async () => {
     setBadge(stSaveChip, 'neutral', 'Guardando...');
     btnSave.disabled = true;
@@ -670,7 +508,6 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
   try { if (!getText('DB_PORT')) el('DB_PORT').value = '3306'; } catch (e) {}
   syncModeUI();
   updatePatronPreview();
-  updateIgnoredSummary();
 
   // Si ya está parametrizado (TABLE_PATTERN y modo DB), cargar columnas y pre-seleccionar opciones guardadas
   (async function loadSchemaIfConfigured() {

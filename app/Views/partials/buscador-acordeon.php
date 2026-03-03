@@ -45,33 +45,4 @@ $h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES); };
       </div>
     </div>
   </div>
-  <div class="acordeon-item" data-acordeon="etiquetas">
-    <div class="acordeon-header">
-      <span><i class="fas fa-tags"></i> Buscar por etiquetas</span>
-    </div>
-    <div class="acordeon-body">
-      <div class="acordeon-body-inner buscador-etiquetas-inner">
-        <div class="buscador-umbral-wrap">
-          <div class="buscador-umbral-track-wrap">
-            <input type="range" class="custom-range buscador-umbral-slider" id="rngUmbral<?php echo $h($suffix); ?>" min="0" max="100" step="1" value="80" aria-label="Umbral">
-            <span class="buscador-umbral-circle" id="lblUmbral<?php echo $h($suffix); ?>" aria-hidden="true">80%</span>
-          </div>
-        </div>
-        <div class="buscador-tags-wrap mb-2">
-          <div id="tagsEtiquetas<?php echo $h($suffix); ?>" class="tags-etiquetas d-flex flex-wrap"></div>
-          <div id="<?php echo $h($idTagsEtiquetasEmpty); ?>" class="tags-etiquetas-empty small text-muted" style="display: none;"><?php echo $h($emptyTagsText); ?></div>
-        </div>
-        <small class="form-text text-muted d-block mb-1" id="stBuscarEtiquetas<?php echo $h($suffix); ?>"></small>
-        <div class="buscador-results-wrap">
-          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2 wrap-btn-abrir-resultados" id="wrapBtnAbrirResultados<?php echo $h($suffix); ?>" style="display: none;">
-            <span class="small text-muted" id="txtCountResultadosEtiq<?php echo $h($suffix); ?>"></span>
-            <button type="button" class="btn btn-sm btn-outline-primary" id="btnAbrirResultadosEnModal<?php echo $h($suffix); ?>" title="Abrir el mismo modal de carpeta pero solo con estas imágenes">
-              <i class="fas fa-th-large mr-1"></i> Abrir en galería
-            </button>
-          </div>
-          <div class="list-group list-group-flex" id="<?php echo $h($idLstResultadosEtiq); ?>"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>

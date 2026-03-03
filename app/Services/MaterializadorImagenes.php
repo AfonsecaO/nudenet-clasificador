@@ -50,9 +50,12 @@ class MaterializadorImagenes
         return strtolower(md5($datoDirecto));
     }
 
+    /** Tamaño de chunk para batch de MD5 (evita límite de placeholders en MySQL). */
+    private const MD5_BATCH_CHUNK_SIZE = 100;
+
     /**
      * Devuelve los MD5 que ya existen en el índice (content_md5 o raw_md5) para el workspace actual.
-     * Una sola consulta UNION.
+     * Consultas en chunks para evitar límites de placeholders.
      */
     private function obtenerMd5ExistentesEnBatch(array $md5List): array
     {
@@ -69,14 +72,17 @@ class MaterializadorImagenes
             AppSchema::ensure($pdo);
             $tImg = AppConnection::table('images');
             $ws = AppConnection::currentSlug() ?? 'default';
-            $ph = implode(',', array_fill(0, count($md5List), '?'));
-            $params = array_merge([$ws], $md5List, [$ws], $md5List);
-            $sql = "SELECT content_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND content_md5 IN ({$ph}) " .
-                   "UNION SELECT raw_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND raw_md5 IN ({$ph})";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-            while (($row = $stmt->fetch(\PDO::FETCH_NUM)) !== false && isset($row[0]) && $row[0] !== '') {
-                $existentes[$row[0]] = true;
+            $chunks = array_chunk($md5List, self::MD5_BATCH_CHUNK_SIZE);
+            foreach ($chunks as $chunk) {
+                $ph = implode(',', array_fill(0, count($chunk), '?'));
+                $params = array_merge([$ws], $chunk, [$ws], $chunk);
+                $sql = "SELECT content_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND content_md5 IN ({$ph}) " .
+                       "UNION SELECT raw_md5 AS m FROM {$tImg} WHERE workspace_slug = ? AND raw_md5 IN ({$ph})";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
+                while (($row = $stmt->fetch(\PDO::FETCH_NUM)) !== false && isset($row[0]) && $row[0] !== '') {
+                    $existentes[$row[0]] = true;
+                }
             }
         } catch (\Throwable $e) {
             // Silencioso: no bloquear materialización
@@ -574,12 +580,13 @@ class MaterializadorImagenes
 
     /**
      * Materializa todas las imágenes de un registro.
-     * Precarga seenMd5 con un batch de MD5 existentes en BD para reducir consultas de dedupe.
+     * Precarga seenMd5 con un batch de MD5 existentes en BD; no resetea seenMd5 entre registros
+     * para acumular hashes en la misma petición y reducir consultas de dedupe.
      */
     public function materializarImagenesRegistro($registro, $columnasImagen, $campoIdentificador, $campoUsrId, $campoFecha, $campoResultado = null)
     {
         $resultados = [];
-        $this->seenMd5 = [];
+        // No resetear seenMd5: acumular entre registros en la misma petición
 
         // Hash de dedupe = MD5 del dato directo de la base (LONGTEXT base64 tal cual viene).
         // para que varias columnas con el mismo nombre o varias “ranuras” no se sobrescriban y todas se materialicen.

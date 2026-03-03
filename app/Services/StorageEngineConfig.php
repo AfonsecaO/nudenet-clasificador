@@ -30,20 +30,42 @@ class StorageEngineConfig
     }
 
     /**
+     * Lee el JSON completo del archivo de configuración.
+     */
+    private static function readData(): array
+    {
+        $path = self::storageEnginePath();
+        if (!is_file($path)) {
+            return ['driver' => self::DRIVER_SQLITE];
+        }
+        $json = @file_get_contents($path);
+        if ($json === false) {
+            return ['driver' => self::DRIVER_SQLITE];
+        }
+        $data = @json_decode($json, true);
+        return is_array($data) ? $data : ['driver' => self::DRIVER_SQLITE];
+    }
+
+    /**
+     * Persiste el JSON completo (preserva claves existentes como registros_descarga).
+     */
+    private static function writeData(array $data): void
+    {
+        $dir = self::databaseDir();
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $path = self::storageEnginePath();
+        file_put_contents($path, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    }
+
+    /**
      * Devuelve el motor elegido: 'sqlite' o 'mysql'. Por defecto 'sqlite' si no existe el archivo.
      */
     public static function getStorageEngine(): string
     {
-        $path = self::storageEnginePath();
-        if (!is_file($path)) {
-            return self::DRIVER_SQLITE;
-        }
-        $json = @file_get_contents($path);
-        if ($json === false) {
-            return self::DRIVER_SQLITE;
-        }
-        $data = @json_decode($json, true);
-        if (!is_array($data) || !isset($data['driver'])) {
+        $data = self::readData();
+        if (!isset($data['driver'])) {
             return self::DRIVER_SQLITE;
         }
         $driver = strtolower(trim((string) $data['driver']));
@@ -51,17 +73,38 @@ class StorageEngineConfig
     }
 
     /**
-     * Persiste el motor elegido. Solo 'sqlite' o 'mysql'. Crea la carpeta database/ si no existe.
+     * Persiste el motor elegido. Solo 'sqlite' o 'mysql'. Preserva otras claves (ej. registros_descarga).
      */
     public static function setStorageEngine(string $driver): void
     {
         $driver = strtolower(trim($driver)) === self::DRIVER_MYSQL ? self::DRIVER_MYSQL : self::DRIVER_SQLITE;
-        $dir = self::databaseDir();
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0755, true);
+        $data = self::readData();
+        $data['driver'] = $driver;
+        if (!isset($data['registros_descarga'])) {
+            $data['registros_descarga'] = 1;
         }
-        $path = self::storageEnginePath();
-        file_put_contents($path, json_encode(['driver' => $driver], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        self::writeData($data);
+    }
+
+    /**
+     * Número de registros a procesar por petición de descarga (global). Default 1, mínimo 1, máximo 1000.
+     */
+    public static function getRegistrosDescarga(): int
+    {
+        $data = self::readData();
+        $n = isset($data['registros_descarga']) ? (int) $data['registros_descarga'] : 1;
+        return max(1, min(1000, $n));
+    }
+
+    /**
+     * Persiste el número de registros por petición de descarga.
+     */
+    public static function setRegistrosDescarga(int $n): void
+    {
+        $n = max(1, min(1000, $n));
+        $data = self::readData();
+        $data['registros_descarga'] = $n;
+        self::writeData($data);
     }
 
     /**

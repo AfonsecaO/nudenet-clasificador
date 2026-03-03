@@ -41,7 +41,7 @@ class SqliteMigrator
         $countFolders = (int)$stmt->fetchColumn();
 
         if ($built === '1' && $countFolders > 0) {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$tFolders} WHERE workspace_slug = :ws AND COALESCE(nombre,'') = ''");
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$tFolders} WHERE workspace_slug = :ws AND COALESCE(name,'') = ''");
             $stmt->execute([':ws' => $ws]);
             $hayVacios = (int)$stmt->fetchColumn();
             if ($hayVacios === 0) {

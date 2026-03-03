@@ -103,11 +103,13 @@ class ProcesadorTablas
 
             if ($registro) {
                 $idActual = (int)$registro[$this->primaryKey];
-                $this->estadoTracker->actualizarUltimoId($tabla, $idActual, null);
+                $estado = $this->estadoTracker->getEstado();
+                $maxId = (int)($estado[$tabla]['max_id'] ?? 0);
+                $faltanRegistros = ($maxId > $idActual);
                 return [
                     'success' => true,
                     'registro' => $registro,
-                    'faltan_registros' => $this->estadoTracker->faltanRegistros($tabla)
+                    'faltan_registros' => $faltanRegistros
                 ];
             }
             $maxIdActual = $this->obtenerMaxIdDesdeOrigen($tabla);

@@ -28,7 +28,7 @@ class EstadoTracker
      */
     public function getUltimoId($tabla)
     {
-        $stmt = $this->pdo->prepare('SELECT ultimo_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND tabla = :t');
+        $stmt = $this->pdo->prepare('SELECT last_processed_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t');
         $stmt->execute([':ws' => $this->ws(), ':t' => $tabla]);
         $v = $stmt->fetchColumn();
         return $v !== false ? (int)$v : 0;
@@ -36,7 +36,7 @@ class EstadoTracker
 
     /**
      * Actualiza el último ID (siguiente id a intentar) para una tabla.
-     * Si $faltanRegistros === null: solo actualiza ultimo_id y ultima_actualizacion (no consulta max_id).
+     * Si $faltanRegistros === null: solo actualiza last_processed_id y last_updated_at (no consulta max_id).
      */
     public function actualizarUltimoId($tabla, $id, $faltanRegistros = true)
     {
@@ -47,8 +47,8 @@ class EstadoTracker
         if ($faltanRegistros === null) {
             $upd = $this->pdo->prepare("
                 UPDATE " . $this->tTablesState . "
-                SET ultimo_id = :u, ultima_actualizacion = :ua
-                WHERE workspace_slug = :ws AND tabla = :t
+                SET last_processed_id = :u, last_updated_at = :ua
+                WHERE workspace_slug = :ws AND table_name = :t
             ");
             $upd->execute([
                 ':u' => (int)$id,
@@ -59,7 +59,7 @@ class EstadoTracker
             return;
         }
 
-        $stmt = $this->pdo->prepare('SELECT max_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND tabla = :t');
+        $stmt = $this->pdo->prepare('SELECT max_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t');
         $stmt->execute([':ws' => $ws, ':t' => $tabla]);
         $maxId = $stmt->fetchColumn();
         $maxId = ($maxId !== false) ? (int)$maxId : null;
@@ -71,8 +71,8 @@ class EstadoTracker
 
         $upd = $this->pdo->prepare("
             UPDATE " . $this->tTablesState . "
-            SET ultimo_id = :u, faltan_registros = :f, ultima_actualizacion = :ua
-            WHERE workspace_slug = :ws AND tabla = :t
+            SET last_processed_id = :u, has_pending = :f, last_updated_at = :ua
+            WHERE workspace_slug = :ws AND table_name = :t
         ");
         $upd->execute([
             ':u' => (int)$id,
@@ -82,7 +82,7 @@ class EstadoTracker
             ':t' => $tabla
         ]);
     }
-    
+
     /**
      * Actualiza el ID máximo de una tabla (preserva el último ID procesado)
      */
@@ -92,17 +92,16 @@ class EstadoTracker
         $now = date('Y-m-d H:i:s');
         $ws = $this->ws();
 
-        $stmt = $this->pdo->prepare('SELECT ultimo_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND tabla = :t');
+        $stmt = $this->pdo->prepare('SELECT last_processed_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t');
         $stmt->execute([':ws' => $ws, ':t' => $tabla]);
         $ultimo = $stmt->fetchColumn();
         $ultimo = ($ultimo !== false) ? (int)$ultimo : 0;
-        // ultimo_id = último ID procesado; faltan si quedan ids por procesar (ultimo < max_id)
         $faltan = ($ultimo < (int)$maxId) ? 1 : 0;
 
         $upd = $this->pdo->prepare("
             UPDATE " . $this->tTablesState . "
-            SET max_id = :m, faltan_registros = :f, ultima_actualizacion_contador = :uac
-            WHERE workspace_slug = :ws AND tabla = :t
+            SET max_id = :m, has_pending = :f, last_count_at = :uac
+            WHERE workspace_slug = :ws AND table_name = :t
         ");
         $upd->execute([
             ':m' => (int)$maxId,
@@ -115,13 +114,13 @@ class EstadoTracker
         $driver = \App\Services\AppConnection::getCurrentDriver();
         if ($driver === 'mysql') {
             $up2 = $this->pdo->prepare("
-                INSERT INTO " . $this->tTablesIndex . "(workspace_slug, tabla, max_id) VALUES(:ws, :t, :m)
+                INSERT INTO " . $this->tTablesIndex . "(workspace_slug, table_name, max_id) VALUES(:ws, :t, :m)
                 ON DUPLICATE KEY UPDATE max_id = VALUES(max_id)
             ");
         } else {
             $up2 = $this->pdo->prepare("
-                INSERT INTO " . $this->tTablesIndex . "(workspace_slug, tabla, max_id) VALUES(:ws, :t, :m)
-                ON CONFLICT(workspace_slug, tabla) DO UPDATE SET max_id=excluded.max_id
+                INSERT INTO " . $this->tTablesIndex . "(workspace_slug, table_name, max_id) VALUES(:ws, :t, :m)
+                ON CONFLICT(workspace_slug, table_name) DO UPDATE SET max_id=excluded.max_id
             ");
         }
         $up2->execute([':ws' => $ws, ':t' => $tabla, ':m' => (int)$maxId]);
@@ -132,7 +131,7 @@ class EstadoTracker
      */
     public function faltanRegistros($tabla)
     {
-        $stmt = $this->pdo->prepare('SELECT faltan_registros FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND tabla = :t');
+        $stmt = $this->pdo->prepare('SELECT has_pending FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t');
         $stmt->execute([':ws' => $this->ws(), ':t' => $tabla]);
         $v = $stmt->fetchColumn();
         if ($v === false) return true;
@@ -140,23 +139,23 @@ class EstadoTracker
     }
 
     /**
-     * Obtiene todo el estado
+     * Obtiene todo el estado (keys compatibles con consumidores existentes)
      */
     public function getEstado()
     {
-        $stmt = $this->pdo->prepare('SELECT tabla, ultimo_id, max_id, faltan_registros, ultima_actualizacion, ultima_actualizacion_contador FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws');
+        $stmt = $this->pdo->prepare('SELECT table_name, last_processed_id, max_id, has_pending, last_updated_at, last_count_at FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws');
         $stmt->execute([':ws' => $this->ws()]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         $out = [];
         foreach ($rows as $r) {
-            $tabla = (string)($r['tabla'] ?? '');
+            $tabla = (string)($r['table_name'] ?? '');
             if ($tabla === '') continue;
             $out[$tabla] = [
-                'ultimo_id' => (int)($r['ultimo_id'] ?? 0),
+                'ultimo_id' => (int)($r['last_processed_id'] ?? 0),
                 'max_id' => (int)($r['max_id'] ?? 0),
-                'faltan_registros' => ((int)($r['faltan_registros'] ?? 1)) !== 0,
-                'ultima_actualizacion' => $r['ultima_actualizacion'] ?? null,
-                'ultima_actualizacion_contador' => $r['ultima_actualizacion_contador'] ?? null
+                'faltan_registros' => ((int)($r['has_pending'] ?? 1)) !== 0,
+                'ultima_actualizacion' => $r['last_updated_at'] ?? null,
+                'ultima_actualizacion_contador' => $r['last_count_at'] ?? null
             ];
         }
         return $out;
@@ -170,13 +169,13 @@ class EstadoTracker
         $ws = $this->ws();
         $pattern = \App\Services\AppSchema::metaGet($this->pdo, 'tables_pattern', null, $ws);
         $updatedAt = \App\Services\AppSchema::metaGet($this->pdo, 'tables_index_updated_at', null, $ws);
-        $stmt = $this->pdo->prepare('SELECT tabla, max_id FROM ' . $this->tTablesIndex . ' WHERE workspace_slug = :ws ORDER BY max_id ASC');
+        $stmt = $this->pdo->prepare('SELECT table_name, max_id FROM ' . $this->tTablesIndex . ' WHERE workspace_slug = :ws ORDER BY max_id ASC');
         $stmt->execute([':ws' => $ws]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         $tablas = [];
         foreach ($rows as $r) {
             $tablas[] = [
-                'tabla' => (string)$r['tabla'],
+                'tabla' => (string)$r['table_name'],
                 'max_id' => (int)$r['max_id']
             ];
         }
@@ -203,7 +202,7 @@ class EstadoTracker
         try {
             $del = $this->pdo->prepare('DELETE FROM ' . $this->tTablesIndex . ' WHERE workspace_slug = :ws');
             $del->execute([':ws' => $ws]);
-            $stmt = $this->pdo->prepare('INSERT INTO ' . $this->tTablesIndex . '(workspace_slug, tabla, max_id) VALUES(:ws, :t, :m)');
+            $stmt = $this->pdo->prepare('INSERT INTO ' . $this->tTablesIndex . '(workspace_slug, table_name, max_id) VALUES(:ws, :t, :m)');
             foreach ($tablas as $t) {
                 if (!is_array($t)) continue;
                 $tabla = (string)($t['tabla'] ?? '');
@@ -216,7 +215,7 @@ class EstadoTracker
             throw $e;
         }
     }
-    
+
     /**
      * Recarga el estado desde el archivo
      */
@@ -226,8 +225,7 @@ class EstadoTracker
     }
 
     /**
-     * Repara tablas marcadas como completadas (faltan_registros=0) que tengan ultimo_id < max_id.
-     * Asigna ultimo_id = max_id para que el contador y la vista muestren valores coherentes.
+     * Repara tablas marcadas como completadas (has_pending=0) que tengan last_processed_id < max_id.
      */
     public function repararUltimoIdEnCompletadas(): void
     {
@@ -237,8 +235,8 @@ class EstadoTracker
         }
         $upd = $this->pdo->prepare("
             UPDATE " . $this->tTablesState . "
-            SET ultimo_id = max_id
-            WHERE workspace_slug = :ws AND (COALESCE(faltan_registros, 1) = 0) AND ultimo_id < max_id
+            SET last_processed_id = max_id
+            WHERE workspace_slug = :ws AND (COALESCE(has_pending, 1) = 0) AND last_processed_id < max_id
         ");
         $upd->execute([':ws' => $ws]);
     }
@@ -251,9 +249,9 @@ class EstadoTracker
         $ws = $this->ws();
         $driver = \App\Services\AppConnection::getCurrentDriver();
         if ($driver === 'mysql') {
-            $stmt = $this->pdo->prepare('INSERT IGNORE INTO ' . $this->tTablesState . '(workspace_slug, tabla) VALUES(:ws, :t)');
+            $stmt = $this->pdo->prepare('INSERT IGNORE INTO ' . $this->tTablesState . '(workspace_slug, table_name) VALUES(:ws, :t)');
         } else {
-            $stmt = $this->pdo->prepare('INSERT INTO ' . $this->tTablesState . '(workspace_slug, tabla) VALUES(:ws, :t) ON CONFLICT(workspace_slug, tabla) DO NOTHING');
+            $stmt = $this->pdo->prepare('INSERT INTO ' . $this->tTablesState . '(workspace_slug, table_name) VALUES(:ws, :t) ON CONFLICT(workspace_slug, table_name) DO NOTHING');
         }
         $stmt->execute([':ws' => $ws, ':t' => $tabla]);
     }
@@ -267,11 +265,13 @@ class EstadoTracker
         $set = array_fill_keys($tablasExistentes, true);
         $ws = $this->ws();
 
-        $stmt = $this->pdo->prepare('SELECT tabla FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws');
+        $stmt = $this->pdo->prepare('SELECT table_name FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws');
         $stmt->execute([':ws' => $ws]);
         $antes = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         $antesSet = [];
-        foreach ($antes as $r) $antesSet[(string)$r['tabla']] = true;
+        foreach ($antes as $r) {
+            $antesSet[(string)$r['table_name']] = true;
+        }
 
         $cambios = false;
         foreach ($tablasExistentes as $t) {
@@ -283,9 +283,9 @@ class EstadoTracker
 
         foreach (array_keys($antesSet) as $t) {
             if (!isset($set[$t])) {
-                $del = $this->pdo->prepare('DELETE FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND tabla = :t');
+                $del = $this->pdo->prepare('DELETE FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t');
                 $del->execute([':ws' => $ws, ':t' => $t]);
-                $del2 = $this->pdo->prepare('DELETE FROM ' . $this->tTablesIndex . ' WHERE workspace_slug = :ws AND tabla = :t');
+                $del2 = $this->pdo->prepare('DELETE FROM ' . $this->tTablesIndex . ' WHERE workspace_slug = :ws AND table_name = :t');
                 $del2->execute([':ws' => $ws, ':t' => $t]);
                 $cambios = true;
             }
@@ -299,7 +299,7 @@ class EstadoTracker
      */
     public function tablaExiste($tabla)
     {
-        $stmt = $this->pdo->prepare('SELECT 1 FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND tabla = :t LIMIT 1');
+        $stmt = $this->pdo->prepare('SELECT 1 FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t LIMIT 1');
         $stmt->execute([':ws' => $this->ws(), ':t' => $tabla]);
         return $stmt->fetchColumn() !== false;
     }

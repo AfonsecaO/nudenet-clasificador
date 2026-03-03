@@ -56,15 +56,6 @@ function pct($n, $d): int {
             <h3 class="card-title"><i class="fas fa-bolt" aria-hidden="true"></i> Acciones</h3>
           </div>
           <div class="card-body acciones-card-body">
-            <div class="acciones-block">
-              <div class="acciones-block-header">
-                <span class="acciones-block-title"><i class="fas fa-robot"></i> Clasificar imagenes</span>
-                <div class="custom-control custom-switch toggle-auto" title="Auto clasificación">
-                  <input type="checkbox" class="custom-control-input" id="switchAuto" autocomplete="off">
-                  <label class="custom-control-label" for="switchAuto">Auto</label>
-                </div>
-              </div>
-            </div>
             <div class="acciones-block acciones-section-tablas" id="accionesSectionTablas">
               <div class="acciones-block-header">
                 <span class="acciones-block-title"><i class="fas fa-database"></i> Descargar registros</span>
@@ -79,9 +70,6 @@ function pct($n, $d): int {
                 <span class="acciones-block-title"><i class="fas fa-tools"></i> Mantenimiento</span>
               </div>
               <div class="acciones-block-actions">
-                <button class="btn btn-accion-mant" id="btnReset" type="button">
-                  <i class="fas fa-undo btn-icon"></i> Reset
-                </button>
                 <button class="btn btn-accion-mant btn-accion-mant-secondary" id="btnReindex" type="button">
                   <i class="fas fa-broom btn-icon"></i> Reindexar
                 </button>
@@ -92,30 +80,9 @@ function pct($n, $d): int {
 
         <div class="card card-dashboard card-clasif card-clasif-fill">
           <div class="card-header card-header-normalized">
-            <h3 class="card-title"><i class="fas fa-robot" aria-hidden="true"></i> Clasificación de imágenes</h3>
+            <h3 class="card-title"><i class="fas fa-images" aria-hidden="true"></i> Imágenes</h3>
           </div>
           <div class="card-body clasif-card-body">
-            <section class="clasif-progress-block" aria-label="Progreso de clasificación">
-              <div class="clasif-progress-header">
-                <span class="clasif-progress-title">Progreso</span>
-                <span class="clasif-progress-count" aria-live="polite">
-                  <b id="txtProcesadas">—</b><span class="clasif-progress-sep" aria-hidden="true">/</span><span id="txtTotal">—</span>
-                </span>
-              </div>
-              <div class="clasif-bar-track" role="presentation">
-                <div class="clasif-bar-fill" id="barProcesadas" data-width="0" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-              </div>
-            </section>
-            <section class="clasif-safe-unsafe" aria-label="Resultados Safe y Unsafe">
-              <div class="clasif-safe-unsafe-inputs">
-                <div class="clasif-input-wrap clasif-input-unsafe">
-                  <input type="text" class="form-control form-control-sm clasif-input-pct" id="txtUnsafe" value="—" placeholder="Unsafe" readonly aria-label="Unsafe">
-                </div>
-                <div class="clasif-input-wrap clasif-input-safe">
-                  <input type="text" class="form-control form-control-sm clasif-input-pct" id="txtSafe" value="—" placeholder="Safe" readonly aria-label="Safe">
-                </div>
-              </div>
-            </section>
             <section class="clasif-upload-block" aria-label="Subir imágenes desde carpeta">
               <div class="upload-zone">
                 <input type="file" class="upload-input-hidden" id="inpFolder" webkitdirectory directory multiple aria-label="Seleccionar carpeta con imágenes">
@@ -337,21 +304,17 @@ function pct($n, $d): int {
   if (indexWorker && typeof window.APP_WORKSPACE === 'string' && window.APP_WORKSPACE) {
     indexWorker.onmessage = function (e) {
       const msg = e.data;
-      if (msg?.type !== 'done' || msg.ws !== window.APP_WORKSPACE) return;
-      if (msg.mode === 'classify') {
-        autoRunning = false;
-        if (switchAuto) switchAuto.checked = false;
-        stopIndexAutoStatsPolling();
-        setStatus(stProcesar, 'neutral', 'Auto detenido');
-        appendLog('info', 'Auto clasificación detenido.');
-        refreshStats().then(() => loadEtiquetas()).then(() => refreshLogPanel());
-      } else if (msg.mode === 'download') {
+      if (msg?.ws !== window.APP_WORKSPACE || msg?.mode !== 'download') return;
+      if (msg.type === 'tick' && msg.data?.log_items) {
+        renderLogFromItems(msg.data.log_items);
+      }
+      if (msg.type === 'done') {
         autoTablasRunning = false;
         if (switchAutoTablas) switchAutoTablas.checked = false;
         stopIndexAutoStatsPolling();
         setStatus(stTablas, 'neutral', 'Auto detenido');
         appendLog('info', 'Auto tablas detenido.');
-        refreshStats().then(() => loadEtiquetas()).then(() => refreshLogPanel());
+        refreshStats().then(() => { if (msg.data?.log_items) renderLogFromItems(msg.data.log_items); else refreshLogPanel(); });
       }
     };
   }
@@ -361,7 +324,6 @@ function pct($n, $d): int {
     if (indexAutoStatsIntervalId) return;
     indexAutoStatsIntervalId = setInterval(() => {
       refreshStats();
-      refreshLogPanel();
     }, 2500);
   }
   function stopIndexAutoStatsPolling() {
@@ -376,16 +338,8 @@ function pct($n, $d): int {
   const txtSafe = el('txtSafe');
   const barProcesadas = el('barProcesadas');
 
-  const stProcesar = el('stProcesar');
-  const switchAuto = document.getElementById('switchAuto');
-  const btnReset = el('btnReset');
   const btnReindex = el('btnReindex');
-
-  const tagsEtiquetas = el('tagsEtiquetas');
-  const rngUmbral = el('rngUmbral');
-  const lblUmbral = el('lblUmbral');
   const stBuscarEtiq = el('stBuscarEtiq');
-  const lstResultadosEtiq = el('lstResultadosEtiq');
 
   const txtBuscarCarpeta = el('txtBuscarCarpeta');
   const stBuscarCarpeta = el('stBuscarCarpeta');
@@ -509,160 +463,7 @@ function pct($n, $d): int {
     }
   }
 
-  async function refreshStats() {
-    const { ok, data } = await getJson('?action=estadisticas_clasificacion');
-    if (ok && data?.success && data?.stats) {
-      renderStats(data.stats);
-    }
-  }
-
-  let selectedEtiquetaLabel = '';
-  let allEtiquetas = []; // { label, count, min, max } desde el backend
-
-  function getUmbralValue() {
-    return Number(rngUmbral?.value ?? 80);
-  }
-
-  function aplicarRangoUmbral() {
-    if (!rngUmbral) return;
-    rngUmbral.min = 0;
-    rngUmbral.max = 100;
-  }
-
-  /** Rango por tag: siempre desde 0 hasta max del tag. Se muestra si el umbral está en [0, max]. */
-  function etiquetaIncluyeUmbral(t, umbral) {
-    const max = t.max != null ? Number(t.max) : 100;
-    return umbral <= max;
-  }
-
-  function renderTagsFiltered(umbral) {
-    if (!tagsEtiquetas) return;
-    const elEmpty = document.getElementById('tagsEtiquetasEmpty');
-    const umbralNum = Number(umbral);
-    const filtered = umbralNum === 0 ? allEtiquetas : allEtiquetas.filter((t) => etiquetaIncluyeUmbral(t, umbralNum));
-    // Si el tag seleccionado ya no cumple el umbral, deseleccionar y ocultar resultados
-    if (selectedEtiquetaLabel && !filtered.some((t) => String(t.label).trim() === selectedEtiquetaLabel)) {
-      selectedEtiquetaLabel = '';
-      renderResultadosEtiq([]);
-      setStatus(stBuscarEtiq, 'neutral', 'Ajusta el umbral o elige otra etiqueta');
-    }
-    tagsEtiquetas.innerHTML = '';
-    if (elEmpty) elEmpty.style.display = filtered.length ? 'none' : 'block';
-    for (const t of filtered) {
-      const label = (t && typeof t === 'object' && t.label != null) ? String(t.label).trim() : '';
-      if (!label) continue;
-      const count = (t && typeof t === 'object' && t.count != null) ? Number(t.count) : null;
-      const min = t.min != null ? Number(t.min) : null;
-      const max = t.max != null ? Number(t.max) : null;
-      const displayLabel = tagLabelToFullText(label);
-      const rangeStr = (min != null && max != null && !Number.isNaN(min) && !Number.isNaN(max)) ? ` [${min}–${max}%]` : '';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn btn-sm btn-outline-primary tag-etiqueta mr-1 mb-1' + (selectedEtiquetaLabel === label ? ' active' : '');
-      btn.dataset.label = label;
-      const mainText = count != null && !Number.isNaN(count) ? `${displayLabel} (${count})` : displayLabel;
-      if (rangeStr) {
-        const spanRange = document.createElement('span');
-        spanRange.className = 'tag-range';
-        spanRange.textContent = rangeStr;
-        btn.appendChild(document.createTextNode(mainText));
-        btn.appendChild(spanRange);
-      } else {
-        btn.textContent = mainText;
-      }
-      btn.addEventListener('click', () => {
-        const yaSeleccionado = selectedEtiquetaLabel === label;
-        if (yaSeleccionado) {
-          selectedEtiquetaLabel = '';
-          document.querySelectorAll('#tagsEtiquetas .tag-etiqueta').forEach((b) => b.classList.remove('active'));
-          renderResultadosEtiq([]);
-          setStatus(stBuscarEtiq, 'neutral', 'Selecciona una etiqueta');
-          return;
-        }
-        selectedEtiquetaLabel = label;
-        document.querySelectorAll('#tagsEtiquetas .tag-etiqueta').forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-        buscarPorEtiqueta(label);
-      });
-      tagsEtiquetas.appendChild(btn);
-    }
-  }
-
-  async function loadEtiquetas() {
-    const { ok, data } = await getJson('?action=etiquetas_detectadas');
-    if (!ok || !data?.success) return;
-    allEtiquetas = Array.isArray(data.etiquetas) ? data.etiquetas : [];
-    aplicarRangoUmbral();
-    renderTagsFiltered(getUmbralValue());
-  }
-
-  let lastResultadosEtiq = [];
-
-  function renderResultadosEtiq(items) {
-    if (!lstResultadosEtiq) return;
-    lstResultadosEtiq.innerHTML = '';
-    const arr = Array.isArray(items) ? items : [];
-    lastResultadosEtiq = arr;
-    const wrapBtn = document.getElementById('wrapBtnAbrirResultados');
-    const txtCount = document.getElementById('txtCountResultadosEtiq');
-    if (wrapBtn) wrapBtn.style.display = arr.length ? 'flex' : 'none';
-    if (txtCount && arr.length) txtCount.textContent = arr.length + ' imagen' + (arr.length !== 1 ? 'es' : '') + ' en esta búsqueda';
-    if (!arr.length) {
-      const div = document.createElement('div');
-      div.className = 'buscador-empty';
-      div.textContent = 'Sin resultados';
-      lstResultadosEtiq.appendChild(div);
-      return;
-    }
-    for (const it of arr) {
-      const ruta = String(it?.ruta_relativa || it?.ruta || '').trim();
-      const carpeta = String(it?.ruta_carpeta || '').trim();
-      const bestScore = (it?.best_score !== undefined && it?.best_score !== null) ? Number(it.best_score) : null;
-      const matches = Array.isArray(it?.matches) ? it.matches : [];
-      const tagsHtml = matches.slice(0, 10).map(m => {
-        const lab = String(m?.label || '').replace(/</g, '&lt;');
-        const sc = (m?.score !== undefined && m?.score !== null) ? Math.round(Number(m.score) * 100) : '';
-        return `<span class="badge badge-light mr-1 mb-1">${lab}${sc !== '' ? ' ' + sc + '%' : ''}</span>`;
-      }).join('');
-
-      const scorePct = bestScore !== null && !Number.isNaN(bestScore) ? Math.round(bestScore * 100) : null;
-      const a = document.createElement('a');
-      a.href = '#';
-      a.className = 'list-group-item list-group-item-action resultado-etiqueta-item';
-      a.innerHTML = `
-        <div class="resultado-etiqueta-row">
-          <span class="resultado-etiqueta-ruta text-monospace">${ruta.replace(/</g,'&lt;')}</span>
-          ${scorePct !== null ? `<span class="badge badge-pill resultado-etiqueta-score">${scorePct}%</span>` : ''}
-        </div>
-        ${tagsHtml ? `<div class="resultado-etiqueta-tags">${tagsHtml}</div>` : ''}
-      `;
-      a.addEventListener('click', async (e) => {
-        e.preventDefault();
-        if (!carpeta) return;
-        await abrirCarpeta(carpeta, carpeta, ruta);
-      });
-      lstResultadosEtiq.appendChild(a);
-    }
-  }
-
-  async function buscarPorEtiqueta(labelOrForce) {
-    const lab = typeof labelOrForce === 'string' ? labelOrForce.trim() : String(selectedEtiquetaLabel || '').trim();
-    const umbralDisplay = Number(rngUmbral?.value || 0);
-    const umbral = umbralDisplay > 0 ? umbralDisplay - 1 : 0;
-    if (!lab) {
-      setStatus(stBuscarEtiq, 'bad', 'Selecciona una etiqueta (click en un tag)');
-      return;
-    }
-    if (typeof expandirBuscador === 'function') expandirBuscador('etiquetas');
-    setStatus(stBuscarEtiq, 'neutral', 'Buscando…');
-    const { ok, data } = await getJson(`?action=buscar_imagenes_etiquetas&labels=${encodeURIComponent(lab)}&umbral=${encodeURIComponent(String(umbral))}`);
-    if (!ok || !data?.success) {
-      setStatus(stBuscarEtiq, 'bad', String(data?.error || 'Error'));
-      return;
-    }
-    setStatus(stBuscarEtiq, 'ok', `Resultados: ${data.total || 0}`);
-    renderResultadosEtiq(data.imagenes || []);
-  }
+  async function refreshStats() {}
 
   const esperePorFavor = el('esperePorFavor');
 
@@ -689,92 +490,6 @@ function pct($n, $d): int {
     if (btnCancel && $modal) btnCancel.onclick = () => $modal.modal('hide');
   }
 
-  async function procesarUna() {
-    const enAuto = autoRunning;
-    if (esperePorFavor && !enAuto) esperePorFavor.style.display = 'flex';
-    setStatus(stProcesar, 'neutral', enAuto ? 'Auto en ejecución…' : 'Procesando…');
-    try {
-      const { ok, data } = await getJson('?action=procesar_imagenes');
-      if (!ok || !data?.success) {
-        setStatus(stProcesar, 'bad', String(data?.error || 'Error'));
-        await refreshLogPanel();
-        return;
-      }
-      if (data?.stopped_due_to_classifier_error) {
-        setAuto(false);
-        setStatus(stProcesar, 'bad', 'Clasificador detenido por error (timeout o respuesta inválida). Revisa y vuelve a activar Auto para retomar.');
-        if (data?.stats) renderStats(data.stats);
-        await refreshLogPanel();
-        return;
-      }
-      if (data?.procesada) {
-        setStatus(stProcesar, 'ok', `Procesada: ${data.ruta_relativa || ''} · resultado: ${data.resultado || ''}`);
-        if (!autoRunning) await loadEtiquetas();
-      } else {
-        setStatus(stProcesar, 'neutral', String(data?.mensaje || 'Sin pendientes'));
-        if (autoRunning && Number(data?.stats?.pendientes || 0) === 0) {
-          setAuto(false);
-        }
-      }
-      if (data?.stats) renderStats(data.stats);
-      await refreshLogPanel();
-    } finally {
-      if (esperePorFavor && !enAuto) esperePorFavor.style.display = 'none';
-    }
-  }
-
-  async function autoLoopImagenes() {
-    while (autoRunning) {
-      try { await procesarUna(); } catch (e) {}
-      if (!autoRunning) break;
-      await new Promise(r => setTimeout(r, 200));
-    }
-  }
-
-  async function setAuto(on) {
-    if (switchAuto) switchAuto.checked = !!on;
-    if (!on) {
-      autoRunning = false;
-      if (indexWorker && window.APP_WORKSPACE) indexWorker.postMessage({ type: 'remove', mode: 'classify', ws: window.APP_WORKSPACE });
-      stopIndexAutoStatsPolling();
-      setStatus(stProcesar, 'neutral', 'Auto detenido');
-      await appendLog('info', 'Auto clasificación detenido.');
-      await refreshLogPanel();
-      await loadEtiquetas();
-      return;
-    }
-    autoRunning = true;
-    setStatus(stProcesar, 'neutral', 'Auto en ejecución…');
-    await appendLog('info', 'Auto clasificación iniciado.');
-    await refreshLogPanel();
-    if (indexWorker && window.APP_WORKSPACE) {
-      startIndexAutoStatsPolling();
-      indexWorker.postMessage({ type: 'add', mode: 'classify', ws: window.APP_WORKSPACE });
-    } else {
-      autoLoopImagenes();
-    }
-  }
-
-  async function resetAll() {
-    showConfirm(
-      'Resetear clasificación',
-      '¿Resetear clasificación y detecciones? Los datos del índice se conservan.',
-      'Resetear',
-      async () => {
-        setStatus(stProcesar, 'neutral', 'Reseteando…');
-        const { ok, data } = await getJson('?action=reset_clasificacion');
-        if (!ok || !data?.success) {
-          setStatus(stProcesar, 'bad', String(data?.error || 'Error'));
-          return;
-        }
-        setStatus(stProcesar, 'ok', 'Reset completado');
-        if (data?.stats) renderStats(data.stats);
-        await loadEtiquetas();
-        await refreshLogPanel();
-      }
-    );
-  }
-
   function reindexAll() {
     showConfirm(
       'Reindexar',
@@ -782,16 +497,15 @@ function pct($n, $d): int {
       'Reindexar',
       async () => {
         if (esperePorFavor) esperePorFavor.style.display = 'flex';
-        setStatus(stProcesar, 'neutral', 'Reindexando y limpiando…');
+        setStatus(stBuscarCarpeta, 'neutral', 'Reindexando y limpiando…');
         try {
           const { ok, data } = await getJson('?action=reindex_imagenes');
           if (!ok || !data?.success) {
-            setStatus(stProcesar, 'bad', String(data?.error || 'Error'));
+            setStatus(stBuscarCarpeta, 'bad', String(data?.error || 'Error'));
             return;
           }
-          setStatus(stProcesar, 'ok', 'Reindex completado');
+          setStatus(stBuscarCarpeta, 'ok', 'Reindex completado');
           if (data?.stats) renderStats(data.stats);
-          await loadEtiquetas();
           await refreshLogPanel();
           await buscarCarpetas(true);
         } finally {
@@ -1346,33 +1060,12 @@ function pct($n, $d): int {
     }
 
     await refreshStats();
-    await loadEtiquetas();
     await refreshLogPanel();
     await buscarCarpetas(true);
   }
 
   // Wire events
-  if (switchAuto) switchAuto.addEventListener('change', () => setAuto(switchAuto.checked));
-  if (btnReset) btnReset.addEventListener('click', resetAll);
   if (btnReindex) btnReindex.addEventListener('click', reindexAll);
-
-  if (rngUmbral && lblUmbral) {
-    const sync = () => {
-      const val = String(rngUmbral.value || '0');
-      lblUmbral.textContent = val + '%';
-      lblUmbral.style.setProperty('--umbral-pct', val + '%');
-    };
-    sync();
-    rngUmbral.addEventListener('input', () => {
-      sync();
-      const umbral = getUmbralValue();
-      renderTagsFiltered(umbral);
-      if (buscarEtiqTimer) clearTimeout(buscarEtiqTimer);
-      buscarEtiqTimer = setTimeout(() => buscarPorEtiqueta(false), 450);
-    });
-  }
-  const btnAbrirResultadosEnModal = document.getElementById('btnAbrirResultadosEnModal');
-  if (btnAbrirResultadosEnModal) btnAbrirResultadosEnModal.addEventListener('click', abrirModalSoloResultadosEtiq);
 
   // Búsqueda de carpetas: automática solo con mínimo 3 caracteres; botón "Buscar" para búsqueda bajo demanda (sin mínimo)
   const MIN_CARACTERES_AUTO = 3;
@@ -1522,17 +1215,16 @@ function pct($n, $d): int {
     marcarPrimeraTablaProcesando();
     if (stTablas) setStatus(stTablas, 'neutral', 'Procesando…');
     const { ok, data } = await getJson('?action=procesar');
+    if (data?.log_items) renderLogFromItems(data.log_items);
+    else { await refreshLogPanel(); }
     if (!ok || !data?.success) {
       if (stTablas) setStatus(stTablas, 'bad', String(data?.error || 'Error'));
       if (data?.estado) renderTablasEstado(data.estado);
-      await refreshLogPanel();
       return;
     }
     const msg = String(data?.mensaje || 'OK');
     if (stTablas) setStatus(stTablas, 'ok', msg);
-    if (data?.clasificacion_stats) renderStats(data.clasificacion_stats);
     if (data?.estado) renderTablasEstado(data.estado);
-    await refreshLogPanel();
     if (autoTablasRunning && data?.success && !data?.registro_procesado && !data?.faltan_registros) {
       setAutoTablas(false);
     }
@@ -1555,7 +1247,6 @@ function pct($n, $d): int {
       setStatus(stTablas, 'neutral', 'Auto detenido');
       await appendLog('info', 'Auto tablas detenido.');
       await refreshLogPanel();
-      await loadEtiquetas();
       return;
     }
     autoTablasRunning = true;
@@ -1586,19 +1277,14 @@ function pct($n, $d): int {
     } catch (e) {}
   }
 
-  async function refreshLogPanel() {
+  function renderLogFromItems(items) {
     if (!logPanel) return;
-    const { ok, data } = await getJson('?action=log_tail&limit=20');
-    if (!ok || !data?.items) {
+    const arr = Array.isArray(items) ? items : [];
+    if (arr.length === 0) {
       logPanel.innerHTML = '<div class="text-muted small">Sin entradas</div>';
       return;
     }
-    const items = Array.isArray(data.items) ? data.items : [];
-    if (items.length === 0) {
-      logPanel.innerHTML = '<div class="text-muted small">Sin entradas</div>';
-      return;
-    }
-    logPanel.innerHTML = items.map((e) => {
+    logPanel.innerHTML = arr.map((e) => {
       const time = String(e.time || e.ts || '').slice(0, 8);
       const msg = String(e.message || '').replace(/</g, '&lt;');
       const type = String(e.type || 'info').toLowerCase();
@@ -1606,6 +1292,16 @@ function pct($n, $d): int {
       return `<div class="log-entry ${cls}"><span class="log-time">${time}</span><span class="log-msg">${msg}</span></div>`;
     }).join('');
     logPanel.scrollTop = logPanel.scrollHeight;
+  }
+
+  async function refreshLogPanel() {
+    if (!logPanel) return;
+    const { ok, data } = await getJson('?action=log_tail&limit=20');
+    if (!ok || !data?.items) {
+      logPanel.innerHTML = '<div class="text-muted small">Sin entradas</div>';
+      return;
+    }
+    renderLogFromItems(data.items);
   }
 
   if (btnLogClear) {
@@ -1625,15 +1321,10 @@ function pct($n, $d): int {
       b.style.width = p + '%';
     });
     await refreshStats();
-    await loadEtiquetas();
     await refreshLogPanel();
-    // Auto-inicio desde Workspaces: Descargar o Clasificar en esta pestaña
     if (window.APP_AUTO === 'descargar' && switchAutoTablas) {
       switchAutoTablas.checked = true;
       setAutoTablas(true);
-    } else if (window.APP_AUTO === 'clasificar' && switchAuto) {
-      switchAuto.checked = true;
-      setAuto(true);
     }
   })();
 </script>

@@ -29,12 +29,6 @@ class SetupController extends BaseController
             $values[$k] = \App\Services\ConfigService::get($k);
         }
 
-        // Workspace nuevo: valores por defecto solo si no hay nada en BD (prioridad a lo guardado)
-        $urlStored = isset($values['CLASIFICADOR_BASE_URL']) ? trim((string)$values['CLASIFICADOR_BASE_URL']) : '';
-        if ($urlStored === '') {
-            $values['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
-        }
-        // No cargar etiquetas ignoradas por defecto: solo usar lo ya guardado en la configuración.
         $faltantes = \App\Services\ConfigService::faltantesRequeridos();
 
         $mysql_global_available = self::testGlobalMysqlConnection();
@@ -75,14 +69,6 @@ class SetupController extends BaseController
         $p = $this->payload();
         $cfg = $this->extraerConfig($p);
         $res = $this->probarDirectorio($cfg);
-        $this->jsonResponse($res, $res['ok'] ? 200 : 400);
-    }
-
-    public function testClasificador()
-    {
-        $p = $this->payload();
-        $cfg = $this->extraerConfig($p);
-        $res = $this->probarClasificador($cfg);
         $this->jsonResponse($res, $res['ok'] ? 200 : 400);
     }
 
@@ -156,34 +142,10 @@ class SetupController extends BaseController
             }
         }
 
-        // El clasificador puede estar apagado durante setup: no bloquear el guardado.
-        $clas = $this->probarClasificador($cfg);
-        if (!$clas['ok']) {
-            $warning = 'Clasificador no verificado: ' . ($clas['error'] ?? 'Error');
-        }
-
         // Persistir (motor de BD se eligió en el wizard inicial; no por workspace)
         $pairs = $cfg;
         unset($pairs['APP_DB_DRIVER']);
-        // Normalización de defaults opcionales
-        if (empty($pairs['CLASIFICADOR_BASE_URL'])) $pairs['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
-        if (!isset($pairs['DETECT_IGNORED_LABELS'])) $pairs['DETECT_IGNORED_LABELS'] = '';
-        // Normalizar CSV de labels ignorados
-        if (is_array($pairs['DETECT_IGNORED_LABELS'] ?? null)) {
-            $items = array_values(array_unique(array_filter(array_map('trim', $pairs['DETECT_IGNORED_LABELS']), fn($x) => $x !== '')));
-            $items = array_values(array_unique(array_map(fn($x) => \App\Services\DetectionLabels::normalizeLabel((string)$x), $items)));
-            $items = array_values(array_filter($items, fn($x) => $x !== ''));
-            $pairs['DETECT_IGNORED_LABELS'] = implode(',', $items);
-        } else {
-            $raw = trim((string)($pairs['DETECT_IGNORED_LABELS'] ?? ''));
-            if ($raw === '') $pairs['DETECT_IGNORED_LABELS'] = '';
-            else {
-                $items = array_filter(array_map('trim', explode(',', $raw)), fn($x) => $x !== '');
-                $items = array_values(array_unique(array_map(fn($x) => \App\Services\DetectionLabels::normalizeLabel((string)$x), $items)));
-                $items = array_values(array_filter($items, fn($x) => $x !== ''));
-                $pairs['DETECT_IGNORED_LABELS'] = implode(',', $items);
-            }
-        }
+        unset($pairs['CLASIFICADOR_BASE_URL'], $pairs['DETECT_IGNORED_LABELS']);
 
         // Limpiar claves deprecadas si existían en la DB
         $pairs['UMBRAL_CLASIFICACION'] = '';
@@ -279,39 +241,10 @@ class SetupController extends BaseController
                 if (array_key_exists($k, $cfg)) $pairs[$k] = (string)($cfg[$k] ?? '');
             }
         } elseif ($module === 'clasificador') {
-            // Normalizar labels ignorados (si vienen)
-            if (isset($cfg['DETECT_IGNORED_LABELS'])) {
-                $rawItems = $cfg['DETECT_IGNORED_LABELS'];
-                if (is_array($rawItems)) {
-                    $items = array_values(array_unique(array_filter(array_map('trim', $rawItems), fn($x) => $x !== '')));
-                } else {
-                    $raw = trim((string)$rawItems);
-                    $items = ($raw === '') ? [] : array_filter(array_map('trim', explode(',', $raw)), fn($x) => $x !== '');
-                }
-                $items = array_values(array_unique(array_map(fn($x) => \App\Services\DetectionLabels::normalizeLabel((string)$x), $items)));
-                $items = array_values(array_filter($items, fn($x) => $x !== ''));
-                $cfg['DETECT_IGNORED_LABELS'] = implode(',', $items);
-            }
-
-            $clas = $this->probarClasificador($cfg);
-            if (!$clas['ok']) $this->jsonResponse(['success' => false, 'ok' => false, 'module' => 'clasificador', 'error' => $clas['error']], 400);
-
-            foreach (['CLASIFICADOR_BASE_URL', 'DETECT_IGNORED_LABELS'] as $k) {
-                if (array_key_exists($k, $cfg)) {
-                    $pairs[$k] = (string)($cfg[$k] ?? '');
-                }
-            }
-            if (empty($pairs['CLASIFICADOR_BASE_URL'])) $pairs['CLASIFICADOR_BASE_URL'] = 'http://localhost:8001/';
-            if (!isset($pairs['DETECT_IGNORED_LABELS'])) $pairs['DETECT_IGNORED_LABELS'] = '';
-
-            // Guardar modo si viene (para wizard)
+            // Módulo clasificador eliminado: aceptar guardado vacío para no romper wizard
             if (isset($cfg['WORKSPACE_MODE'])) {
                 $pairs['WORKSPACE_MODE'] = (string)$cfg['WORKSPACE_MODE'];
             }
-
-            // Limpiar claves deprecadas si existían en la DB
-            $pairs['UMBRAL_CLASIFICACION'] = '';
-            $pairs['DETECT_UNSAFE_CLASSES'] = '';
         } else {
             $this->jsonResponse(['success' => false, 'ok' => false, 'error' => 'Module inválido'], 400);
         }
@@ -350,13 +283,6 @@ class SetupController extends BaseController
             if (!array_key_exists($k, $p)) continue;
             if ($k === 'COLUMNAS_IMAGEN') {
                 // Puede venir como array desde el multi-select
-                if (is_array($p[$k])) {
-                    $out[$k] = array_values(array_filter(array_map('trim', $p[$k]), fn($x) => $x !== ''));
-                } else {
-                    $out[$k] = is_string($p[$k]) ? trim($p[$k]) : (string)$p[$k];
-                }
-            } elseif ($k === 'DETECT_IGNORED_LABELS') {
-                // Puede venir como array (checkboxes múltiples)
                 if (is_array($p[$k])) {
                     $out[$k] = array_values(array_filter(array_map('trim', $p[$k]), fn($x) => $x !== ''));
                 } else {
@@ -579,72 +505,6 @@ class SetupController extends BaseController
             return ['success' => true, 'ok' => true, 'module' => 'dir', 'mensaje' => 'Directorio OK', 'ruta' => $dir];
         } catch (\Throwable $e) {
             return ['success' => true, 'ok' => false, 'module' => 'dir', 'error' => $e->getMessage()];
-        }
-    }
-
-    private function faviconPath(): string
-    {
-        // Usar el favicon real del proyecto para el test del clasificador
-        return __DIR__ . '/../../public/img/favicon.png';
-    }
-
-    private function probarClasificador(array $cfg): array
-    {
-        if (!function_exists('curl_init')) {
-            return ['success' => true, 'ok' => false, 'module' => 'clasificador', 'error' => 'La extensión cURL no está habilitada en PHP'];
-        }
-
-        $baseUrl = $cfg['CLASIFICADOR_BASE_URL'] ?? 'http://localhost:8001/';
-        $baseUrl = rtrim(trim((string)$baseUrl), '/');
-        if ($baseUrl === '') $baseUrl = 'http://localhost:8001/';
-
-        $url = $baseUrl . '/health';
-
-        try {
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL => $url,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER => ['accept: application/json'],
-                CURLOPT_CUSTOMREQUEST => 'GET',
-                CURLOPT_TIMEOUT => 20
-            ]);
-            $body = curl_exec($ch);
-            $curlErr = curl_error($ch);
-            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-            if ($body === false || $curlErr) {
-                return ['success' => true, 'ok' => false, 'module' => 'clasificador', 'error' => ($curlErr ?: 'Error desconocido'), 'http_code' => $httpCode];
-            }
-            $json = json_decode($body ?: '', true);
-            if (!is_array($json)) {
-                $preview = substr((string)$body, 0, 300);
-                return ['success' => true, 'ok' => false, 'module' => 'clasificador', 'error' => "HTTP {$httpCode}: Respuesta no-JSON o inválida", 'http_code' => $httpCode, 'raw_preview' => $preview];
-            }
-
-            $ok = null;
-            if (array_key_exists('ok', $json)) {
-                $ok = (bool)$json['ok'];
-            } elseif ($httpCode >= 200 && $httpCode < 300) {
-                // Fallback: si responde 2xx con JSON, asumir health OK
-                $ok = true;
-            } else {
-                $ok = false;
-            }
-
-            if (!$ok) {
-                return ['success' => true, 'ok' => false, 'module' => 'clasificador', 'error' => 'Health no OK', 'http_code' => $httpCode, 'raw' => $json];
-            }
-
-            return [
-                'success' => true,
-                'ok' => true,
-                'module' => 'clasificador',
-                'mensaje' => 'Health OK',
-                'http_code' => $httpCode
-            ];
-        } catch (\Throwable $e) {
-            return ['success' => true, 'ok' => false, 'module' => 'clasificador', 'error' => $e->getMessage()];
         }
     }
 

@@ -1,7 +1,7 @@
-/* PhotoClassifier – plantilla minimalista, tema claro */
+/* PhotoClassifier – tema claro, UI mejorada */
 
 :root {
-  --bg-page: #f8fafc;
+  --bg-page: #f1f5f9;
   --bg-surface: #ffffff;
   --text: #0f172a;
   --text-muted: #64748b;
@@ -16,13 +16,16 @@
   --danger-bg: #fef2f2;
   --info: #0284c7;
   --info-bg: #f0f9ff;
-  --radius: 8px;
+  --radius: 10px;
   --radius-sm: 6px;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 4px 10px -5px rgba(0, 0, 0, 0.04);
   --nav-height: 56px;
   --content-max: none;
   --folder-tree-indent: 2.5rem;
+  --focus-ring: 2px solid var(--accent);
+  --focus-offset: 2px;
   /* Paleta suave para modal y chips */
   --soft-1: #5b7c99;
   --soft-1-bg: #e8eef4;
@@ -46,12 +49,21 @@ body {
   width: 100%;
   max-width: 100%;
   height: 100%;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   background: var(--bg-page);
   color: var(--text);
-  line-height: 1.5;
+  line-height: 1.55;
   overflow-x: hidden;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; margin-top: 0; }
+.main .container-fluid .row:first-child { margin-top: 0; }
+.main .row { margin-bottom: 0.75rem; }
+.main .row.dashboard-columns { margin-bottom: 0; }
+.main .row > [class*="col-"] { margin-bottom: 0.5rem; }
+@media (min-width: 992px) {
+  .main .row > [class*="col-"] { margin-bottom: 0; }
 }
 
 /* Layout — contenedores usan todo el espacio disponible */
@@ -87,6 +99,11 @@ body.page-setup .app { overflow-y: auto; overflow-x: hidden; }
 body.page-setup .main,
 body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-height: 0; }
 
+/* Parametrización global: permitir scroll para ver todo el contenido (MySQL, botones, etc.) */
+body.page-workspace-global-config .app { overflow-y: auto; overflow-x: hidden; min-height: 100vh; }
+body.page-workspace-global-config .main,
+body.page-workspace-global-config .main .container--global-config { overflow: visible; flex: 0 0 auto; min-height: 0; }
+
 @media (min-width: 768px) {
   .main { padding-left: 0.75rem; padding-right: 0.75rem; }
   .container-fluid { padding-left: 0.75rem; padding-right: 0.75rem; }
@@ -97,15 +114,17 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
 }
 
 /* Parametrización global / wizard: centrado y ancho contenido */
-.page-global-config.main { justify-content: flex-start; padding-top: 2rem; padding-bottom: 3rem; }
-.page-global-config .container--global-config { max-width: 640px; }
-.page-global-config .global-config-form .card { border-radius: var(--radius); box-shadow: var(--shadow-md); border: 1px solid var(--border); }
-.page-global-config .global-config-form .card-header { font-weight: 600; color: var(--text); border-bottom: 1px solid var(--border); }
-.page-global-config .justify-content-center { justify-content: center; }
-.page-global-config .gap-2 { gap: 0.5rem; }
-.page-global-config .d-flex { display: flex; }
-.page-global-config .flex-wrap { flex-wrap: wrap; }
-.page-global-config .align-items-center { align-items: center; }
+.page-global-config.main { justify-content: flex-start; padding-top: 1.5rem; padding-bottom: 3rem; }
+.page-global-config .container--global-config { max-width: 960px; }
+.page-global-config .global-config-form .card.global-config-card { border-radius: var(--radius); box-shadow: var(--shadow-md); border: 1px solid var(--border); }
+.page-global-config .global-config-form .card-header { font-weight: 600; color: var(--text); border-bottom: 1px solid var(--border); background: var(--bg-page); padding: 0.875rem 1.25rem; }
+.page-global-config .global-config-form .card-body { padding: 1.25rem; }
+.page-global-config .global-config-cards .card { min-height: 1px; }
+.page-global-config .global-config-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 1rem 0; border-top: 1px solid var(--border); margin-top: 0.5rem; }
+.page-global-config .global-config-actions .btn-lg { min-width: 10rem; }
+.page-global-config .global-config-actions .ml-3 { margin-left: 1rem; }
+.page-global-config .global-config-actions .align-middle { vertical-align: middle; }
+.page-global-config .mr-2 { margin-right: 0.5rem; }
 
 /* Top nav */
 .topnav {
@@ -116,48 +135,50 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   padding: 0 1rem;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
 }
 @media (min-width: 992px) {
-  .topnav { padding-left: 1.25rem; padding-right: 1.25rem; }
+  .topnav { padding-left: 1.5rem; padding-right: 1.5rem; }
 }
 .topnav-brand {
   font-weight: 600;
-  font-size: 1.1rem;
+  font-size: 1.125rem;
   color: var(--text);
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  transition: color 0.15s ease;
+  transition: color 0.2s ease;
+  padding: 0.25rem 0;
 }
 .topnav-brand:hover { color: var(--accent); }
+.topnav-brand:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); border-radius: var(--radius-sm); }
 .topnav-links {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.125rem;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 .topnav-links li { list-style: none; }
 .topnav-links a, .topnav-links span.nav-text {
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.875rem;
   color: var(--text-muted);
   text-decoration: none;
   font-size: 0.9375rem;
+  font-weight: 500;
   border-radius: var(--radius-sm);
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color 0.2s ease, background 0.2s ease;
 }
 .topnav-links a:hover { color: var(--accent); background: var(--info-bg); }
 .topnav-links a.active {
   color: var(--accent);
-  font-weight: 500;
-  border-bottom: 2px solid var(--accent);
-  margin-bottom: -1px;
-  padding-bottom: calc(0.5rem - 1px);
+  font-weight: 600;
+  background: rgba(37, 99, 235, 0.08);
 }
+.topnav-links a:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .topnav-links span.nav-text { color: var(--text); }
 
 /* Notice / Alert (sustituto callout) */
@@ -214,9 +235,11 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   overflow: hidden;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
+.card:hover { box-shadow: var(--shadow-md); }
 .card-header {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border);
@@ -227,9 +250,11 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 0.5rem;
+  background: var(--bg-surface);
 }
 .card-header .card-title { margin: 0; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 1rem; }
 .card-header.cursor-pointer { cursor: pointer; user-select: none; }
+.card-header.cursor-pointer:hover { background: var(--bg-page); }
 .card-header.cursor-pointer .card-tablas-chevron { transition: transform 0.2s ease; }
 .card-header.cursor-pointer[aria-expanded="false"] .card-tablas-chevron { transform: rotate(-90deg); }
 .card-body { padding: 1.25rem; }
@@ -262,9 +287,16 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   font-family: inherit;
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
+.btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-sm { padding: 0.4rem 0.85rem; font-size: 0.8125rem; }
+.btn-lg { padding: 0.6rem 1.25rem; font-size: 1rem; }
 .btn-icon { opacity: 0.95; font-size: 0.8em; }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+.form-control { border-radius: var(--radius-sm); }
+.form-group label { font-weight: 500; color: var(--text); margin-bottom: 0.35rem; }
 
 /* Action buttons group (Clasificación, Tablas) */
 .action-buttons {
@@ -1878,23 +1910,25 @@ body.page-setup .main .container-fluid { overflow: visible; flex: 0 0 auto; min-
   min-height: 180px;
   overflow-y: auto;
   font-size: 0.8125rem;
-  font-family: ui-monospace, monospace;
+  line-height: 1.5;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
   background: var(--bg-page);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0.5rem 0.75rem;
+  padding: 0.6rem 0.85rem;
 }
+.log-panel .text-muted.small { padding: 0.5rem 0; color: var(--text-muted); }
 .log-panel .log-entry {
-  padding: 0.2rem 0;
+  padding: 0.4rem 0;
   border-bottom: 1px solid var(--border);
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
   align-items: flex-start;
 }
 .log-panel .log-entry:last-child { border-bottom: none; }
-.log-panel .log-time { color: var(--text-muted); flex-shrink: 0; }
-.log-panel .log-msg { word-break: break-word; }
-.log-panel .log-entry.log-error .log-msg { color: var(--danger); }
+.log-panel .log-time { color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; min-width: 4.5em; }
+.log-panel .log-msg { word-break: break-word; flex: 1; }
+.log-panel .log-entry.log-error .log-msg { color: var(--danger); font-weight: 500; }
 .log-panel .log-entry.log-warning .log-msg { color: var(--warning); }
 .log-panel .log-entry.log-success .log-msg { color: var(--success); }
 
@@ -2269,36 +2303,22 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
 
 .ws-card {
   background: var(--bg-surface);
-  border-radius: 14px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow);
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
   overflow: hidden;
-  position: relative;
 }
-.ws-card::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: var(--border);
-  border-radius: 12px 0 0 12px;
-}
-.ws-card--ok::before { background: var(--success); opacity: 0.9; }
-.ws-card--pending::before { background: var(--warning); opacity: 0.85; }
-.ws-card--current::before { background: var(--info); width: 5px; }
 .ws-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-md);
+  border-color: var(--border);
 }
 
 .ws-card-inner {
-  padding: 1.25rem 1.35rem 1.2rem;
+  padding: 1.1rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 .ws-card-top {
@@ -2390,28 +2410,23 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
 }
 
 .ws-card-stats {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
   margin: 0;
   width: 100%;
   min-width: 0;
 }
 .ws-stat {
-  flex: 1 1 0;
-  min-width: 110px;
   text-align: center;
   padding: 0.7rem 0.5rem;
   background: var(--bg-page);
   border-radius: 8px;
   border: 1px solid var(--border);
+  min-width: 0;
 }
 .ws-stat-full {
-  flex: 0 0 100%;
-  width: 100%;
-  max-width: 100%;
-  min-width: 100%;
-  box-sizing: border-box;
+  grid-column: span 1;
 }
 .ws-stat-num {
   display: block;
@@ -2434,75 +2449,64 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
   margin-right: 0.2rem;
 }
 
-/* Botones: grid 2x2, todos el mismo ancho, menos espacio */
+/* Botones: 2 filas; si un botón queda solo en su fila, ocupa todo el ancho */
 .ws-card-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  padding-top: 0.6rem;
-  margin-top: 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
   border-top: 1px solid var(--border);
 }
 .ws-card-actions .btn {
-  width: 100%;
-  min-width: 0;
+  flex: 1 1 calc(50% - 0.2rem);
+  min-width: 4.5rem;
+  max-width: 100%;
   padding: 0.5rem 0.6rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  border-radius: 8px;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  border-radius: var(--radius-sm);
   border-width: 1px;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2.25rem;
+  min-height: 2.125rem;
   text-align: center;
-}
-.ws-card-actions .btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-.ws-card-actions .btn:active:not(:disabled) {
-  transform: translateY(0);
+  white-space: normal;
+  word-break: break-word;
 }
 .ws-card-actions .btn:focus-visible {
   outline: 2px solid var(--info);
   outline-offset: 2px;
 }
 .ws-card-actions .btn i {
-  margin-right: 0.35rem;
-  opacity: 0.95;
+  margin-right: 0.4rem;
+  opacity: 0.9;
   flex-shrink: 0;
+  font-size: 0.8em;
 }
-/* Fila 1: Entrar (ocupa todo o primera celda), Parametrización */
-.ws-card-actions .btnEnterWs {
-  order: 1;
-}
-.ws-card-actions .btnSetupWs {
-  order: 2;
-}
-/* Fila 2: Descargar, Clasificar */
-.ws-card-actions .btnWsDescargar {
-  order: 3;
-}
-.ws-card-actions .btnWsClasificar {
-  order: 4;
-}
-/* Entrar: CTA principal, destaca en la primera posición */
+.ws-card-actions .btnEnterWs { order: 1; }
+.ws-card-actions .btnSetupWs { order: 2; }
+.ws-card-actions .btnWsDescargar,
+.ws-card-actions .ws-card-actions-btn-descargar { order: 3; }
+.ws-card-actions .btnWsClasificar { order: 4; }
+/* Entrar: único botón primario */
 .ws-card-actions .btnEnterWs.btn-primary {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
-  border: none;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
-  font-weight: 600;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
 }
 .ws-card-actions .btnEnterWs.btn-primary:hover:not(:disabled) {
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
   color: #fff;
 }
-/* Parametrización: secundario neutro, mismo peso visual que Entrar en la fila */
+/* Parametrización y Descargar: outline discretos */
 .ws-card-actions .btnSetupWs {
-  background: var(--bg-surface);
+  background: transparent;
   color: var(--text-muted);
   border-color: var(--border);
 }
@@ -2511,26 +2515,27 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
   color: var(--text);
   border-color: var(--text-muted);
 }
-/* Descargar y Clasificar: misma fila, estilos de acción (info / success) */
-.ws-card-actions .btnWsDescargar {
-  background: var(--info-bg);
+.ws-card-actions .btnWsDescargar,
+.ws-card-actions .ws-card-actions-btn-descargar {
+  background: transparent;
   color: var(--info);
-  border: 1px solid rgba(2, 132, 199, 0.25);
+  border-color: var(--border);
 }
-.ws-card-actions .btnWsDescargar:hover:not(:disabled) {
-  background: var(--info);
-  color: #fff;
+.ws-card-actions .btnWsDescargar:hover:not(:disabled),
+.ws-card-actions .ws-card-actions-btn-descargar:hover:not(:disabled) {
+  background: var(--info-bg);
   border-color: var(--info);
+  color: var(--info);
 }
 .ws-card-actions .btnWsClasificar {
-  background: var(--success-bg);
+  background: transparent;
   color: var(--success);
-  border: 1px solid rgba(5, 150, 105, 0.25);
+  border-color: var(--border);
 }
 .ws-card-actions .btnWsClasificar:hover:not(:disabled) {
-  background: var(--success);
-  color: #fff;
+  background: var(--success-bg);
   border-color: var(--success);
+  color: var(--success);
 }
 
 /* Panel Procesando: barra compacta con chips en línea */

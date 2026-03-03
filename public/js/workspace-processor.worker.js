@@ -1,18 +1,11 @@
 /**
- * Web Worker: descarga y clasificación por workspaces.
- * - Cada contenedor es independiente: descarga y clasificación inician en seguida al activarlos.
- * - Dentro de un mismo contenedor, descarga y clasificación son independientes: pueden correr las dos a la vez (una petición a la vez por tipo).
- * - Varios contenedores pueden estar en descarga y/o clasificación en paralelo.
+ * Web Worker: descarga por workspaces.
  * Sin polling: la UI se actualiza con cada mensaje 'tick'.
  */
 const downloadSet = new Set();
-const classifySet = new Set();
 let stopRequested = false;
 let baseUrl = '';
-/** Workspaces que tienen un loop de descarga activo */
 const downloadRunning = new Set();
-/** Workspaces que tienen un loop de clasificación activo */
-const classifyRunning = new Set();
 
 function buildUrl(action, ws) {
   const params = `action=${encodeURIComponent(action)}&workspace=${encodeURIComponent(ws)}`;
@@ -46,26 +39,6 @@ async function runDownloadLoop(ws) {
   }
 }
 
-async function runClassifyLoop(ws) {
-  // Única condición: la siguiente petición solo se inicia cuando la anterior haya finalizado (éxito, error o complete).
-  while (!stopRequested && classifySet.has(ws)) {
-    const url = buildUrl('procesar_imagenes', ws);
-    const t0 = Date.now();
-    const { ok, data } = await fetchJson(url);
-    const durationMs = Date.now() - t0;
-    self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data, durationMs });
-    if (!ok || !data?.success) break;
-    // Si hubo error del clasificador (timeout/respuesta inválida), la imagen ya quedó marcada como error; continuar con la siguiente.
-    if (data?.stopped_due_to_classifier_error) continue;
-    const noMoreWork = data?.procesada === false && (data?.pendientes ?? data?.pending ?? 0) === 0;
-    if (noMoreWork) {
-      classifySet.delete(ws);
-      self.postMessage({ type: 'done', mode: 'classify', ws });
-      break;
-    }
-  }
-}
-
 /** Inicia descarga para este workspace si está en cola y no tiene descarga activa. */
 function tryStartDownload(ws) {
   if (downloadRunning.has(ws) || !downloadSet.has(ws)) return;
@@ -73,16 +46,6 @@ function tryStartDownload(ws) {
   runDownloadLoop(ws).finally(() => {
     downloadRunning.delete(ws);
     if (downloadSet.has(ws)) tryStartDownload(ws);
-  });
-}
-
-/** Inicia clasificación para este workspace si está en cola y no tiene clasificación activa. */
-function tryStartClassify(ws) {
-  if (classifyRunning.has(ws) || !classifySet.has(ws)) return;
-  classifyRunning.add(ws);
-  runClassifyLoop(ws).finally(() => {
-    classifyRunning.delete(ws);
-    if (classifySet.has(ws)) tryStartClassify(ws);
   });
 }
 
@@ -98,26 +61,20 @@ self.onmessage = function (e) {
       if (msg.mode === 'download' && msg.ws) {
         downloadSet.add(msg.ws);
         tryStartDownload(msg.ws);
-        self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
-      } else if (msg.mode === 'classify' && msg.ws) {
-        classifySet.add(msg.ws);
-        tryStartClassify(msg.ws);
-        self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
+        self.postMessage({ type: 'state', download: [...downloadSet], classify: [] });
       }
       break;
     case 'remove':
       if (msg.mode === 'download' && msg.ws) downloadSet.delete(msg.ws);
-      else if (msg.mode === 'classify' && msg.ws) classifySet.delete(msg.ws);
-      self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
+      self.postMessage({ type: 'state', download: [...downloadSet], classify: [] });
       break;
     case 'stopAll':
       stopRequested = true;
       downloadSet.clear();
-      classifySet.clear();
       self.postMessage({ type: 'state', download: [], classify: [] });
       break;
     case 'getState':
-      self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
+      self.postMessage({ type: 'state', download: [...downloadSet], classify: [] });
       break;
     default:
       break;

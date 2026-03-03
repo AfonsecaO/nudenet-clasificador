@@ -198,7 +198,7 @@ class WorkspaceService
 
         try {
             $pdo = AppConnection::get();
-            $tables = ['meta', 'app_config', 'tables_state', 'tables_index', 'images', 'folders', 'detections'];
+            $tables = ['meta', 'app_config', 'tables_state', 'tables_index', 'images', 'folders'];
             foreach ($tables as $name) {
                 $table = AppConnection::table($name);
                 $stmt = $pdo->prepare("DELETE FROM {$table} WHERE workspace_slug = :ws");
