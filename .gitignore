@@ -11,6 +11,7 @@
 
 # Datos por workspace (imágenes, BD, caché, avatares)
 /workspaces/
+/database/
 
 # Sistema operativo
 .DS_Store
