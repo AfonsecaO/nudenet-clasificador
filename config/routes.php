@@ -71,6 +71,26 @@ return [
         'method' => 'estadisticasDescarga',
         'type' => 'api'
     ],
+    'procesar_moderacion' => [
+        'controller' => 'ModeracionController',
+        'method' => 'procesar',
+        'type' => 'api'
+    ],
+    'estadisticas_moderacion' => [
+        'controller' => 'ModeracionController',
+        'method' => 'estadisticasModeracion',
+        'type' => 'api'
+    ],
+    'etiquetas_moderacion' => [
+        'controller' => 'ModeracionController',
+        'method' => 'etiquetasDisponibles',
+        'type' => 'api'
+    ],
+    'buscar_por_moderacion' => [
+        'controller' => 'ModeracionController',
+        'method' => 'buscarPorModeracion',
+        'type' => 'api'
+    ],
     'reindex_imagenes' => [
         'controller' => 'ImagenesController',
         'method' => 'reindexDesdeFilesystem',

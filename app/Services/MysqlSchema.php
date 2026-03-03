@@ -126,9 +126,12 @@ class MysqlSchema
                 file_mtime BIGINT NULL,
                 file_size INT NULL,
                 scan_run INT DEFAULT 0,
+                moderation_analyzed_at DATETIME NULL,
+                moderation_model_version VARCHAR(20) NULL,
                 PRIMARY KEY (workspace_slug, relative_path)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        self::addImagesModerationColumnsIfMissing($pdo, $imagesTable);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_ws', 'workspace_slug', false);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_ws_folder_path', 'workspace_slug, folder_path', false);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_folder_path', 'folder_path', false);
@@ -139,6 +142,25 @@ class MysqlSchema
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_content_md5', 'content_md5', false);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_ws_raw_md5', 'workspace_slug, raw_md5', false);
         self::createIndexIfNotExists($pdo, $imagesTable, 'idx_images_file_mtime', 'file_mtime', false);
+
+        $imlTable = self::quoteId('image_moderation_labels');
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS {$imlTable} (
+                workspace_slug VARCHAR(191) NOT NULL,
+                relative_path VARCHAR(191) NOT NULL,
+                taxonomy_level TINYINT NOT NULL,
+                label_name VARCHAR(255) NOT NULL,
+                parent_name VARCHAR(255) NULL,
+                confidence DECIMAL(5,2) NULL,
+                created_at DATETIME NULL,
+                PRIMARY KEY (workspace_slug, relative_path(191), taxonomy_level, label_name(191))
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        self::createIndexIfNotExists($pdo, $imlTable, 'idx_iml_ws', 'workspace_slug', false);
+        self::createIndexIfNotExists($pdo, $imlTable, 'idx_iml_ws_level', 'workspace_slug, taxonomy_level', false);
+        self::createIndexIfNotExists($pdo, $imlTable, 'idx_iml_ws_label', 'workspace_slug, label_name(191)', false);
+        self::createIndexIfNotExists($pdo, $imlTable, 'idx_iml_ws_level_label', 'workspace_slug, taxonomy_level, label_name(191)', false);
+        self::createIndexIfNotExists($pdo, $imlTable, 'idx_iml_ws_label_conf', 'workspace_slug, label_name(191), confidence', false);
 
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS {$foldersTable} (
@@ -175,5 +197,24 @@ class MysqlSchema
         $meta = self::quoteId('workspace_meta');
         $stmt = $pdo->prepare("INSERT INTO {$meta} (workspace_slug, `key`, value) VALUES(:ws, :k, :v) ON DUPLICATE KEY UPDATE value = VALUES(value)");
         $stmt->execute([':ws' => $ws, ':k' => $key, ':v' => $value]);
+    }
+
+    /**
+     * Añade columnas de moderación a images si la tabla ya existía sin ellas (migración).
+     */
+    private static function addImagesModerationColumnsIfMissing(PDO $pdo, string $imagesTable): void
+    {
+        $db = $pdo->query('SELECT DATABASE()')->fetchColumn();
+        $tableName = trim($imagesTable, '`');
+        $stmt = $pdo->prepare("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :t AND COLUMN_NAME = 'moderation_analyzed_at'");
+        $stmt->execute([':db' => $db, ':t' => $tableName]);
+        if (!$stmt->fetchColumn()) {
+            $pdo->exec("ALTER TABLE {$imagesTable} ADD COLUMN moderation_analyzed_at DATETIME NULL");
+        }
+        $stmt = $pdo->prepare("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :t AND COLUMN_NAME = 'moderation_model_version'");
+        $stmt->execute([':db' => $db, ':t' => $tableName]);
+        if (!$stmt->fetchColumn()) {
+            $pdo->exec("ALTER TABLE {$imagesTable} ADD COLUMN moderation_model_version VARCHAR(20) NULL");
+        }
     }
 }

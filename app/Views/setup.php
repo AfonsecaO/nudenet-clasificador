@@ -59,7 +59,7 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
 
     <div class="row">
       <div class="col-12 col-lg-6">
-        <div class="card">
+        <div class="card h-100">
           <div class="card-header">
             <h3 class="card-title"><i class="fas fa-layer-group"></i> Workspace</h3>
           </div>
@@ -80,45 +80,42 @@ $__mysqlGlobalAvailable = !empty($mysql_global_available);
           </div>
         </div>
       </div>
-    </div>
-
-        <div class="row <?php echo $__mode === 'images_only' ? 'd-none' : ''; ?>" id="setupDbSection">
-          <div class="col-12">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-database"></i> Base de datos (MySQL)</h3>
-                <span class="badge badge-secondary" id="stDbChip">Pendiente</span>
+      <div class="col-12 col-lg-6 <?php echo $__mode === 'images_only' ? 'd-none' : ''; ?>" id="setupDbSection">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-database"></i> Base de datos (MySQL)</h3>
+            <span class="badge badge-secondary" id="stDbChip">Pendiente</span>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="DB_HOST">DB_HOST</label>
+              <input class="form-control" id="DB_HOST" value="<?php echo v('DB_HOST',$values); ?>">
+            </div>
+            <div class="form-row">
+              <div class="form-group col-md-3">
+                <label for="DB_PORT">DB_PORT</label>
+                <input class="form-control" id="DB_PORT" value="<?php echo v('DB_PORT',$values); ?>">
               </div>
-              <div class="card-body">
-                <div class="form-group">
-                  <label for="DB_HOST">DB_HOST</label>
-                  <input class="form-control" id="DB_HOST" value="<?php echo v('DB_HOST',$values); ?>">
-                </div>
-                <div class="form-row">
-                  <div class="form-group col-md-3">
-                    <label for="DB_PORT">DB_PORT</label>
-                    <input class="form-control" id="DB_PORT" value="<?php echo v('DB_PORT',$values); ?>">
-                  </div>
-                  <div class="form-group col-md-9">
-                    <label for="DB_NAME">DB_NAME</label>
-                    <input class="form-control" id="DB_NAME" value="<?php echo v('DB_NAME',$values); ?>">
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group col-md-6">
-                    <label for="DB_USER">DB_USER</label>
-                    <input class="form-control" id="DB_USER" value="<?php echo v('DB_USER',$values); ?>">
-                  </div>
-                  <div class="form-group col-md-6">
-                    <label for="DB_PASS">DB_PASS</label>
-                    <input class="form-control" id="DB_PASS" type="password" value="<?php echo v('DB_PASS',$values); ?>">
-                  </div>
-                </div>
-                <button class="btn btn-info" type="button" id="btnTestDb"><i class="fas fa-check-circle"></i> Probar DB</button>
+              <div class="form-group col-md-9">
+                <label for="DB_NAME">DB_NAME</label>
+                <input class="form-control" id="DB_NAME" value="<?php echo v('DB_NAME',$values); ?>">
               </div>
             </div>
+            <div class="form-row">
+              <div class="form-group col-md-6">
+                <label for="DB_USER">DB_USER</label>
+                <input class="form-control" id="DB_USER" value="<?php echo v('DB_USER',$values); ?>">
+              </div>
+              <div class="form-group col-md-6">
+                <label for="DB_PASS">DB_PASS</label>
+                <input class="form-control" id="DB_PASS" type="password" value="<?php echo v('DB_PASS',$values); ?>">
+              </div>
+            </div>
+            <button class="btn btn-info" type="button" id="btnTestDb"><i class="fas fa-check-circle"></i> Probar DB</button>
           </div>
         </div>
+      </div>
+    </div>
 
         <div class="row <?php echo $__mode === 'images_only' ? 'd-none' : ''; ?>" id="setupSchemaSection">
           <div class="col-12">

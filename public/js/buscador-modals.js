@@ -278,8 +278,15 @@
       const f = files[i];
       const nombre = String(f?.nombre || '').trim();
       const rutaRel = String(f?.ruta_relativa || '').trim();
+      const folderPath = String(f?.folder_path || '').trim();
       const tags = Array.isArray(f?.tags) ? f.tags : [];
+      const modLabels = Array.isArray(f?.moderation_labels) ? f.moderation_labels : [];
       const tagLabels = tags.map(function (t) { return String(t || '').trim(); }).filter(Boolean);
+      for (var mi = 0; mi < modLabels.length; mi++) {
+        var ml = modLabels[mi];
+        var mn = (ml && ml.name) ? String(ml.name).trim() : '';
+        if (mn) tagLabels.push(mn + (ml.confidence != null ? ' ' + Number(ml.confidence).toFixed(0) + '%' : ''));
+      }
       if (f?.pendiente) tagLabels.unshift('PENDIENTE');
 
       const col = document.createElement('div');
@@ -294,7 +301,8 @@
       const img = document.createElement('img');
       img.alt = nombre;
       img.loading = 'lazy';
-      const thumbUrl = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(lastFolder?.ruta || '') + '&archivo=' + encodeURIComponent(nombre) + '&thumb=1&w=240', ws);
+      const rutaForThumb = (lastFolder?.ruta === '__moderation__') ? folderPath : (lastFolder?.ruta || '');
+      const thumbUrl = buildUrl('?action=ver_imagen&ruta=' + encodeURIComponent(rutaForThumb) + '&archivo=' + encodeURIComponent(nombre) + '&thumb=1&w=240', ws);
       imgWrap.appendChild(img);
       a.appendChild(imgWrap);
       const body = document.createElement('div');
@@ -324,7 +332,8 @@
       a.appendChild(body);
       a.addEventListener('click', async function (e) {
         e.preventDefault();
-        await BuscadorModals.openVisor(lastFolder?.ruta || '', nombre, rutaRel, ws);
+        const rutaVisor = (lastFolder?.ruta === '__moderation__') ? folderPath : (lastFolder?.ruta || '');
+        await BuscadorModals.openVisor(rutaVisor, nombre, rutaRel, ws);
       });
       card.appendChild(a);
       col.appendChild(card);
@@ -433,11 +442,9 @@
 
   function drawCanvas() {
     const cnv = cfg?.refs?.cnv;
-    const swBoxes = cfg?.refs?.swBoxes;
     if (!cnv) return;
     if (!visor.img) return;
     const img = visor.img;
-    const show = !!(swBoxes && swBoxes.checked);
     const ctx = cnv.getContext('2d');
     if (!ctx) return;
 
@@ -455,31 +462,6 @@
     cnv.height = displayH;
     ctx.clearRect(0, 0, displayW, displayH);
     ctx.drawImage(img, 0, 0, naturalW, naturalH, 0, 0, displayW, displayH);
-
-    if (!show) return;
-
-    const dets = Array.isArray(visor.detections) ? visor.detections : [];
-    const lineW = Math.max(1.5, displayW / 600);
-    const fontSize = Math.max(12, displayW / 60);
-    ctx.lineWidth = lineW;
-    ctx.font = Math.round(fontSize) + 'px "Source Sans Pro", sans-serif';
-    for (let i = 0; i < dets.length; i++) {
-      const d = dets[i];
-      const box = Array.isArray(d?.box) ? d.box : null;
-      if (!box || box.length !== 4) continue;
-      const x1 = Number(box[0] || 0), y1 = Number(box[1] || 0), x2 = Number(box[2] || 0), y2 = Number(box[3] || 0);
-      const w = Math.max(1, (x2 - x1) * scale);
-      const h = Math.max(1, (y2 - y1) * scale);
-      const sx1 = x1 * scale;
-      const sy1 = y1 * scale;
-      ctx.strokeStyle = '#dc3545';
-      ctx.strokeRect(sx1, sy1, w, h);
-      const label = String(d?.label || '').trim();
-      const score = Number(d?.score || 0);
-      const text = label ? label + ' ' + score.toFixed(3) : score.toFixed(3);
-      ctx.fillStyle = '#dc3545';
-      ctx.fillText(text, sx1 + 4, Math.max(fontSize + 2, sy1 - 4));
-    }
   }
 
   async function openFolder(nombre, ruta, selectedImageRutaRelativa, workspace) {
@@ -532,6 +514,37 @@
       }
       folderSelectedImageRuta = '';
     }
+  }
+
+  /** Abre el modal de carpeta con resultados de búsqueda por moderación (imagenes desde buscar_por_moderacion). */
+  function openModerationResults(imagenes, workspace) {
+    if (!cfg?.refs) return;
+    currentWorkspace = workspace || null;
+    folderSelectedImageRuta = '';
+    lastFolder = { nombre: 'Resultados moderación', ruta: '__moderation__' };
+    folderFilter = 'ALL'; /* siempre mostrar todas las imágenes; filtro por etiqueta ya se aplicó en el buscador */
+    folderFiles = Array.isArray(imagenes) ? imagenes.map(function (img) {
+      return {
+        nombre: String(img.filename || img.archivo || '').trim() || '—',
+        ruta_relativa: String(img.relative_path || '').trim(),
+        folder_path: String(img.folder_path || '').trim(),
+        es_imagen: true,
+        tags: [],
+        moderation_labels: Array.isArray(img.moderation_labels) ? img.moderation_labels : [],
+        pendiente: false,
+        tamano: 0,
+        extension: ''
+      };
+    }) : [];
+    const ttlCarpeta = cfg.refs.ttlCarpeta;
+    const tagsCarpeta = cfg.refs.tagsCarpeta;
+    const gridThumbs = cfg.refs.gridThumbs;
+    if (ttlCarpeta) ttlCarpeta.textContent = lastFolder.nombre;
+    if (tagsCarpeta) tagsCarpeta.innerHTML = '';
+    if (gridThumbs) gridThumbs.innerHTML = '';
+    renderFolderTags();
+    renderFolderGrid();
+    showModal(cfg.refs.modalCarpeta);
   }
 
   async function openVisor(ruta, archivo, rutaRelativa, workspace) {
@@ -645,14 +658,12 @@
 
   function wireVisorShownAndResize() {
     const modalVisor = cfg?.refs?.modalVisor;
-    const swBoxes = cfg?.refs?.swBoxes;
     if (window.jQuery && modalVisor) {
       window.jQuery(modalVisor).on('shown.bs.modal', drawCanvas);
     }
     window.addEventListener('resize', function () {
       if (modalVisor && modalVisor.classList.contains('show')) drawCanvas();
     });
-    if (swBoxes) swBoxes.addEventListener('change', drawCanvas);
   }
 
   var OPEN_GALLERY_MAX_ITEMS = 200;
@@ -753,6 +764,7 @@
       });
     },
     openFolder: openFolder,
+    openModerationResults: openModerationResults,
     openVisor: openVisor,
     openFolderStacked: openFolderStacked,
     openGalleryResultados: openGalleryResultados,

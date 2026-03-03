@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Services\AppConnection;
 use App\Services\ConfigService;
 use App\Services\MysqlAppConfig;
+use App\Services\StorageEngineConfig;
 use App\Services\StringNormalizer;
 use App\Services\TablasLiveService;
 use App\Services\WorkspaceService;
@@ -147,11 +148,14 @@ class WorkspaceController extends BaseController
     public function globalConfig()
     {
         $config = MysqlAppConfig::get();
-        $storageEngine = \App\Services\StorageEngineConfig::getStorageEngine();
+        $storageEngine = StorageEngineConfig::getStorageEngine();
+        $aws = StorageEngineConfig::getAwsConfig();
         $this->render('workspace_global_config', [
             'mysql' => $config,
             'storage_engine' => $storageEngine,
-            'registros_descarga' => \App\Services\StorageEngineConfig::getRegistrosDescarga(),
+            'registros_descarga' => StorageEngineConfig::getRegistrosDescarga(),
+            'registros_moderacion' => StorageEngineConfig::getRegistrosModeracion(),
+            'aws' => $aws,
         ]);
     }
 
@@ -165,10 +169,14 @@ class WorkspaceController extends BaseController
         $driver = isset($p['driver']) ? strtolower(trim((string) $p['driver'])) : '';
 
         if ($driver === 'sqlite') {
-            \App\Services\StorageEngineConfig::setStorageEngine('sqlite');
+            StorageEngineConfig::setStorageEngine('sqlite');
             $n = isset($p['registros_descarga']) ? (int) $p['registros_descarga'] : 1;
             $n = max(1, min(1000, $n));
-            \App\Services\StorageEngineConfig::setRegistrosDescarga($n);
+            StorageEngineConfig::setRegistrosDescarga($n);
+            $nMod = isset($p['registros_moderacion']) ? (int) $p['registros_moderacion'] : 20;
+            $nMod = max(1, min(100, $nMod));
+            StorageEngineConfig::setRegistrosModeracion($nMod);
+            $this->persistAwsConfig($p);
             $this->jsonResponse(['success' => true]);
             return;
         }
@@ -221,11 +229,39 @@ class WorkspaceController extends BaseController
             $toSave['password'] = (string) $p['password'];
         }
         MysqlAppConfig::save($toSave);
-        \App\Services\StorageEngineConfig::setStorageEngine('mysql');
+        StorageEngineConfig::setStorageEngine('mysql');
         $n = isset($p['registros_descarga']) ? (int) $p['registros_descarga'] : 1;
         $n = max(1, min(1000, $n));
-        \App\Services\StorageEngineConfig::setRegistrosDescarga($n);
+        StorageEngineConfig::setRegistrosDescarga($n);
+        $nMod = isset($p['registros_moderacion']) ? (int) $p['registros_moderacion'] : 20;
+        $nMod = max(1, min(100, $nMod));
+        StorageEngineConfig::setRegistrosModeracion($nMod);
+        $this->persistAwsConfig($p);
         $this->jsonResponse(['success' => true]);
+    }
+
+    /**
+     * Persiste la sección AWS desde el payload (preserva secret si viene vacío).
+     */
+    private function persistAwsConfig(array $p): void
+    {
+        if (!isset($p['aws']) || !is_array($p['aws'])) {
+            return;
+        }
+        $aws = $p['aws'];
+        $current = StorageEngineConfig::getAwsConfig();
+        if ((string) ($aws['secret'] ?? '') === '' && isset($current['secret'])) {
+            $aws['secret'] = (string) $current['secret'];
+        }
+        $out = [
+            'key' => isset($aws['key']) ? trim((string) $aws['key']) : '',
+            'secret' => isset($aws['secret']) ? (string) $aws['secret'] : '',
+            'region' => isset($aws['region']) ? trim((string) $aws['region']) : 'us-east-1',
+            'version' => isset($aws['version']) ? trim((string) $aws['version']) : 'latest',
+            'min_confidence' => isset($aws['min_confidence']) ? (float) $aws['min_confidence'] : 50.0,
+        ];
+        $out['min_confidence'] = max(0.0, min(100.0, $out['min_confidence']));
+        StorageEngineConfig::setAwsConfig($out);
     }
 
     private function payload(): array
@@ -268,6 +304,7 @@ class WorkspaceController extends BaseController
             'images_total' => null,
             'images_pending' => 0,
             'registros_pendientes_descarga' => null,
+            'imagenes_pendientes_moderacion' => null,
         ];
 
         try {
@@ -303,6 +340,18 @@ class WorkspaceController extends BaseController
             $st = $pdo->prepare("SELECT COUNT(*) AS total FROM {$tImages} WHERE workspace_slug = :ws");
             $st->execute([':ws' => $slug]);
             $out['images_total'] = (int)$st->fetchColumn();
+
+            try {
+                $condMod = AppConnection::getCurrentDriver() === 'mysql'
+                    ? 'moderation_analyzed_at IS NULL'
+                    : '(moderation_analyzed_at IS NULL OR moderation_analyzed_at = \'\')';
+                $stMod = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = :ws AND {$condMod}");
+                $stMod->execute([':ws' => $slug]);
+                $out['imagenes_pendientes_moderacion'] = (int)$stMod->fetchColumn();
+            } catch (\Throwable $e) {
+                // Si la columna no existe (migración pendiente) o hay error, todas las imágenes están por moderar
+                $out['imagenes_pendientes_moderacion'] = (int)($out['images_total'] ?? 0);
+            }
 
             if ($out['mode'] === 'db_and_images') {
                 $tTablesState = AppConnection::table('tables_state');

@@ -48,21 +48,49 @@ function pct($n, $d): int {
 
     <!-- 3 columnas: 3 (acciones + clasificación con subir) | 6 (buscadores) | 3 (log) -->
     <div class="row dashboard-columns">
-      <!-- Columna izquierda: Acciones + Clasificación -->
+      <!-- Columna izquierda: Indicadores independientes + Acciones + Clasificación -->
       <div class="col-lg-3 col-md-12 mb-3 col-clasif">
-        <!-- Contenedor único con todos los botones organizados por título -->
+        <!-- Indicadores (misma estructura y proporciones que en vista global workspaces) -->
+        <div class="ws-card-stats mb-2" aria-label="Estadísticas del workspace">
+          <div class="ws-stat">
+            <span class="ws-stat-num" id="accionIndImagenesTotal">—</span>
+            <span class="ws-stat-lbl"><i class="fas fa-image"></i> Imágenes en total</span>
+          </div>
+          <div class="ws-stat ws-stat-full" title="Imágenes aún no procesadas con Rekognition">
+            <span class="ws-stat-num" id="accionIndPorModerar">—</span>
+            <span class="ws-stat-lbl"><i class="fas fa-shield-alt"></i> Por moderar</span>
+          </div>
+          <?php if ($isDbMode): ?>
+          <div class="ws-stat ws-stat-full ws-stat-col12">
+            <span class="ws-stat-num" id="accionIndRegistrosDescarga">—</span>
+            <span class="ws-stat-lbl"><i class="fas fa-download"></i> Registros por descargar</span>
+          </div>
+          <?php endif; ?>
+        </div>
+        <!-- Card Acciones (solo botones) -->
         <div class="card card-acciones mb-3">
           <div class="card-header card-header-normalized">
             <h3 class="card-title"><i class="fas fa-bolt" aria-hidden="true"></i> Acciones</h3>
           </div>
           <div class="card-body acciones-card-body">
-            <div class="acciones-block acciones-section-tablas" id="accionesSectionTablas">
-              <div class="acciones-block-header">
-                <span class="acciones-block-title"><i class="fas fa-database"></i> Descargar registros</span>
-                <div class="custom-control custom-switch toggle-auto" title="Auto tablas">
-                  <input type="checkbox" class="custom-control-input" id="switchAutoTablas" autocomplete="off">
-                  <label class="custom-control-label" for="switchAutoTablas">Auto</label>
+            <div class="acciones-block acciones-block-descarga-moderacion row">
+              <?php if ($isDbMode): ?>
+              <div class="col-6 acciones-block-col">
+                <div class="acciones-block-actions">
+                  <button class="btn btn-accion-mant btn-accion-mant-secondary btn-block" id="btnDescargarRegistros" type="button" title="Descargar tablas del workspace">
+                    <i class="fas fa-download btn-icon"></i> <span class="btn-accion-text">Descargar registros</span>
+                  </button>
                 </div>
+                <small class="form-text text-muted" id="stTablas"></small>
+              </div>
+              <?php endif; ?>
+              <div class="col-6 acciones-block-col">
+                <div class="acciones-block-actions">
+                  <button class="btn btn-accion-mant btn-accion-mant-secondary btn-block" id="btnClasificarModeracion" type="button" title="Clasificar imágenes pendientes con AWS Rekognition Content Moderation">
+                    <i class="fas fa-shield-alt btn-icon"></i> <span class="btn-accion-text">Clasificar moderación</span>
+                  </button>
+                </div>
+                <small class="form-text text-muted" id="stModeracion"></small>
               </div>
             </div>
             <div class="acciones-block acciones-block-mantenimiento">
@@ -234,12 +262,7 @@ function pct($n, $d): int {
       </div>
       <div class="modal-body modal-visor-body">
         <div class="visor-toolbar" role="toolbar" aria-label="Acciones de la imagen">
-          <div class="visor-toolbar-left">
-            <div class="custom-control custom-switch">
-              <input type="checkbox" class="custom-control-input" id="swBoxes" checked>
-              <label class="custom-control-label" for="swBoxes">Bounding boxes</label>
-            </div>
-          </div>
+          <div class="visor-toolbar-left"></div>
           <span class="visor-toolbar-divider" aria-hidden="true"></span>
           <div class="visor-toolbar-buttons">
             <button type="button" class="btn btn-sm visor-btn visor-btn-folder" id="btnVisorAbrirCarpeta" title="Ir a la carpeta que contiene esta imagen" aria-label="Ir a carpeta">
@@ -301,20 +324,95 @@ function pct($n, $d): int {
     console.warn('Web Worker no disponible en index:', e);
   }
 
+  let clasificarModeracionRunning = false;
+  let lastRefreshAccionesAt = 0;
+  const REFRESH_ACCIONES_THROTTLE_MS = 2000;
   if (indexWorker && typeof window.APP_WORKSPACE === 'string' && window.APP_WORKSPACE) {
     indexWorker.onmessage = function (e) {
       const msg = e.data;
-      if (msg?.ws !== window.APP_WORKSPACE || msg?.mode !== 'download') return;
-      if (msg.type === 'tick' && msg.data?.log_items) {
-        renderLogFromItems(msg.data.log_items);
+      if (msg?.ws !== window.APP_WORKSPACE) return;
+      if (msg.mode === 'download') {
+        if (msg.type === 'tick' && msg.data?.log_items) renderLogFromItems(msg.data.log_items);
+        if (msg.type === 'tick') {
+          const ind = msg.data?.indicadores;
+          if (ind) {
+            if (typeof ind.registros_pendientes_descarga === 'number') {
+              const elReg = document.getElementById('accionIndRegistrosDescarga');
+              if (elReg) elReg.textContent = Number(ind.registros_pendientes_descarga).toLocaleString();
+            }
+            if (typeof ind.imagenes_total === 'number') {
+              const elTotal = document.getElementById('accionIndImagenesTotal');
+              if (elTotal) elTotal.textContent = Number(ind.imagenes_total).toLocaleString();
+            }
+            if (typeof ind.imagenes_pendientes_moderacion === 'number') {
+              const elMod = document.getElementById('accionIndPorModerar');
+              if (elMod) elMod.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
+            }
+            const stTablasEl = document.getElementById('stTablas');
+            if (stTablasEl) setStatus(stTablasEl, 'neutral', 'Imágenes: ' + Number(ind.imagenes_total ?? 0).toLocaleString());
+          } else if (typeof msg.data?.pendientes === 'number') {
+            const elReg = document.getElementById('accionIndRegistrosDescarga');
+            if (elReg) elReg.textContent = Number(msg.data.pendientes).toLocaleString();
+            if (Date.now() - lastRefreshAccionesAt > REFRESH_ACCIONES_THROTTLE_MS) {
+              lastRefreshAccionesAt = Date.now();
+              refreshAccionesIndicadores();
+            }
+          }
+        }
+        if (msg.type === 'done') {
+          autoTablasRunning = false;
+          const btnDesc = document.getElementById('btnDescargarRegistros');
+          if (btnDesc) { const t = btnDesc.querySelector('.btn-accion-text'); if (t) t.textContent = 'Descargar registros'; }
+          stopIndexAutoStatsPolling();
+          setStatus(stTablas, 'neutral', 'Detenido');
+          appendLog('info', 'Descarga detenida.');
+          refreshAccionesIndicadores();
+          refreshStats().then(() => { if (msg.data?.log_items) renderLogFromItems(msg.data.log_items); else refreshLogPanel(); });
+        }
+        return;
       }
-      if (msg.type === 'done') {
-        autoTablasRunning = false;
-        if (switchAutoTablas) switchAutoTablas.checked = false;
-        stopIndexAutoStatsPolling();
-        setStatus(stTablas, 'neutral', 'Auto detenido');
-        appendLog('info', 'Auto tablas detenido.');
-        refreshStats().then(() => { if (msg.data?.log_items) renderLogFromItems(msg.data.log_items); else refreshLogPanel(); });
+      if (msg.mode === 'classify') {
+        if (msg.type === 'tick') {
+          if (msg.data?.log_items) renderLogFromItems(msg.data.log_items);
+          const ind = msg.data?.indicadores;
+          const data = msg.data || {};
+          if (ind) {
+            if (typeof ind.registros_pendientes_descarga === 'number') {
+              const elReg = document.getElementById('accionIndRegistrosDescarga');
+              if (elReg) elReg.textContent = Number(ind.registros_pendientes_descarga).toLocaleString();
+            }
+            if (typeof ind.imagenes_total === 'number') {
+              const elTotal = document.getElementById('accionIndImagenesTotal');
+              if (elTotal) elTotal.textContent = Number(ind.imagenes_total).toLocaleString();
+            }
+            if (typeof ind.imagenes_pendientes_moderacion === 'number') {
+              const elMod = document.getElementById('accionIndPorModerar');
+              if (elMod) elMod.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
+            }
+            const stModEl = document.getElementById('stModeracion');
+            if (stModEl) setStatus(stModEl, 'neutral', Number(data.procesadas ?? 0).toLocaleString() + ' ok, ' + Number(data.pendientes ?? ind.imagenes_pendientes_moderacion ?? 0).toLocaleString() + ' pend.');
+          } else if (typeof msg.data?.pendientes === 'number') {
+            const elMod = document.getElementById('accionIndPorModerar');
+            if (elMod) elMod.textContent = Number(msg.data.pendientes).toLocaleString();
+            const stModEl = document.getElementById('stModeracion');
+            if (stModEl) setStatus(stModEl, 'neutral', '0 ok, ' + Number(msg.data.pendientes).toLocaleString() + ' pend.');
+            if (Date.now() - lastRefreshAccionesAt > REFRESH_ACCIONES_THROTTLE_MS) {
+              lastRefreshAccionesAt = Date.now();
+              refreshAccionesIndicadores();
+            }
+          }
+        }
+        if (msg.type === 'done') {
+          clasificarModeracionRunning = false;
+          const btnMod = document.getElementById('btnClasificarModeracion');
+          if (btnMod) { const t = btnMod.querySelector('.btn-accion-text'); if (t) t.textContent = 'Clasificar moderación'; }
+          const stMod = document.getElementById('stModeracion');
+          if (stMod) stMod.textContent = 'Finalizado.';
+          appendLog('info', 'Clasificación de moderación finalizada.');
+          refreshAccionesIndicadores();
+          refreshLogPanel();
+        }
+        return;
       }
     };
   }
@@ -364,7 +462,6 @@ function pct($n, $d): int {
   const ttlImagenWrap = el('ttlImagenWrap');
   const lnkAbrirOriginal = el('lnkAbrirOriginal');
   const btnVisorAbrirCarpeta = el('btnVisorAbrirCarpeta');
-  const swBoxes = el('swBoxes');
   const badgesDet = el('badgesDet');
   const cnv = el('cnv');
   const stVisor = el('stVisor');
@@ -398,7 +495,6 @@ function pct($n, $d): int {
         ttlImagenWrap,
         lnkAbrirOriginal,
         btnVisorAbrirCarpeta,
-        swBoxes,
         badgesDet,
         cnv,
         stVisor,
@@ -424,6 +520,29 @@ function pct($n, $d): int {
     const resp = await fetch(url, { headers: { 'accept': 'application/json' } });
     const data = await resp.json().catch(() => ({}));
     return { ok: resp.ok, data };
+  }
+
+  async function refreshAccionesIndicadores() {
+    if (!window.APP_WORKSPACE) return;
+    const elReg = document.getElementById('accionIndRegistrosDescarga');
+    const elTotal = document.getElementById('accionIndImagenesTotal');
+    const elMod = document.getElementById('accionIndPorModerar');
+    const fmt = (n) => (typeof n === 'number' ? Number(n).toLocaleString() : '—');
+    try {
+      const [rDesc, rMod] = await Promise.all([
+        getJson('?action=estadisticas_descarga'),
+        getJson('?action=estadisticas_moderacion')
+      ]);
+      if (rDesc.ok && rDesc.data?.stats && typeof rDesc.data.stats.pendientes === 'number') {
+        if (elReg) elReg.textContent = fmt(rDesc.data.stats.pendientes);
+      }
+      if (rMod.ok && rMod.data?.success) {
+        const analizadas = Number(rMod.data.analizadas ?? 0);
+        const pendientes = Number(rMod.data.pendientes ?? 0);
+        if (elMod) elMod.textContent = fmt(pendientes);
+        if (elTotal) elTotal.textContent = fmt(analizadas + pendientes);
+      }
+    } catch (e) {}
   }
 
   function pct(n, d) {
@@ -1067,6 +1186,37 @@ function pct($n, $d): int {
   // Wire events
   if (btnReindex) btnReindex.addEventListener('click', reindexAll);
 
+  const btnClasificarModeracion = document.getElementById('btnClasificarModeracion');
+  const stModeracion = document.getElementById('stModeracion');
+  function setStModeracion(msg) {
+    if (stModeracion) stModeracion.textContent = msg || '';
+  }
+  if (btnClasificarModeracion) {
+    btnClasificarModeracion.addEventListener('click', function () {
+      if (!window.APP_WORKSPACE || !indexWorker) {
+        if (stModeracion) {
+          if (!window.APP_WORKSPACE) stModeracion.textContent = 'Entra desde una card de workspace (botón Entrar) para usar moderación.';
+          else stModeracion.textContent = 'El worker de procesamiento no está disponible.';
+        }
+        return;
+      }
+      if (clasificarModeracionRunning) {
+        clasificarModeracionRunning = false;
+        const t = btnClasificarModeracion.querySelector('.btn-accion-text');
+        if (t) t.textContent = 'Clasificar moderación';
+        if (stModeracion) stModeracion.textContent = 'Detenido.';
+        indexWorker.postMessage({ type: 'remove', mode: 'classify', ws: window.APP_WORKSPACE });
+        return;
+      }
+      clasificarModeracionRunning = true;
+      const t = btnClasificarModeracion.querySelector('.btn-accion-text');
+      if (t) t.textContent = 'Detener moderación';
+      if (stModeracion) stModeracion.textContent = 'Clasificando…';
+      indexWorker.postMessage({ type: 'add', mode: 'classify', ws: window.APP_WORKSPACE });
+    });
+  }
+  if (stModeracion && window.APP_WORKSPACE && indexWorker) setStModeracion('');
+
   // Búsqueda de carpetas: automática solo con mínimo 3 caracteres; botón "Buscar" para búsqueda bajo demanda (sin mínimo)
   const MIN_CARACTERES_AUTO = 3;
   let buscarCarpetaTimer = null;
@@ -1097,18 +1247,188 @@ function pct($n, $d): int {
   const acordeon = document.getElementById('buscadorAcordeon');
   function expandirBuscador(quien) {
     if (!acordeon) return;
-    acordeon.classList.remove('expanded-etiquetas', 'expanded-carpetas');
+    acordeon.classList.remove('expanded-etiquetas', 'expanded-carpetas', 'expanded-moderacion');
     if (quien === 'etiquetas') acordeon.classList.add('expanded-etiquetas');
     if (quien === 'carpetas') acordeon.classList.add('expanded-carpetas');
+    if (quien === 'moderacion') acordeon.classList.add('expanded-moderacion');
   }
 
   document.querySelectorAll('#buscadorAcordeon .acordeon-item').forEach((item) => {
     const quien = item.getAttribute('data-acordeon');
     const header = item.querySelector('.acordeon-header');
-    if (header && quien) header.addEventListener('click', () => expandirBuscador(quien));
+    if (header && quien) {
+      header.addEventListener('click', () => {
+        expandirBuscador(quien);
+        if (quien === 'moderacion' && typeof loadEtiquetasModeracion === 'function') loadEtiquetasModeracion();
+      });
+    }
     item.addEventListener('focusin', () => { if (quien) expandirBuscador(quien); });
   });
   if (txtBuscarCarpeta) txtBuscarCarpeta.addEventListener('focus', () => expandirBuscador('carpetas'));
+
+  // Filtrar por moderación: etiquetas clicables
+  const lstEtiquetasModeracion = document.getElementById('lstEtiquetasModeracion');
+  const stModeracionBuscar = document.getElementById('stModeracionBuscar');
+  const gridResultadosModeracion = document.getElementById('gridResultadosModeracion');
+  const selectedModTags = new Set();
+  const paginacionModeracion = document.getElementById('paginacionModeracion');
+  const stPaginacionModeracion = document.getElementById('stPaginacionModeracion');
+  const btnModeracionPrev = document.getElementById('btnModeracionPrev');
+  const btnModeracionNext = document.getElementById('btnModeracionNext');
+  let modCurrentPage = 1;
+  const PER_PAGE_MOD = 60;
+
+  function renderModerationResultsInline(imagenes) {
+    if (!gridResultadosModeracion) return;
+    gridResultadosModeracion.innerHTML = '';
+    if (!Array.isArray(imagenes) || imagenes.length === 0) return;
+    const ws = typeof window.APP_WORKSPACE === 'string' ? window.APP_WORKSPACE : null;
+    for (let i = 0; i < imagenes.length; i++) {
+      const img = imagenes[i];
+      const nombre = String(img.filename || img.archivo || '').trim() || '—';
+      const rutaRel = String(img.relative_path || '').trim();
+      const folderPath = String(img.folder_path || '').trim();
+      const modLabels = Array.isArray(img.moderation_labels) ? img.moderation_labels : [];
+      const tagLabels = modLabels.map(function (ml) {
+        const mn = (ml && ml.name) ? String(ml.name).trim() : '';
+        const conf = ml && ml.confidence != null ? Number(ml.confidence).toFixed(0) + '%' : '';
+        return mn ? (mn + (conf ? ' ' + conf : '')) : '';
+      }).filter(Boolean);
+
+      const col = document.createElement('div');
+      col.className = 'col-6 col-sm-4 col-md-3 col-lg-2 mb-3';
+      const card = document.createElement('div');
+      card.className = 'thumb-card';
+      const a = document.createElement('a');
+      a.href = '#';
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (window.BuscadorModals && window.BuscadorModals.openVisor) {
+          window.BuscadorModals.openVisor(folderPath, nombre, rutaRel, ws);
+        }
+      });
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'thumb-card-img';
+      const thumbImg = document.createElement('img');
+      thumbImg.alt = nombre;
+      thumbImg.loading = 'lazy';
+      const thumbUrl = appendWorkspace('?action=ver_imagen&ruta=' + encodeURIComponent(folderPath) + '&archivo=' + encodeURIComponent(nombre) + '&thumb=1&w=240');
+      thumbImg.src = thumbUrl;
+      imgWrap.appendChild(thumbImg);
+      a.appendChild(imgWrap);
+      const body = document.createElement('div');
+      body.className = 'thumb-card-body';
+      const title = document.createElement('div');
+      title.className = 'thumb-card-title';
+      title.textContent = nombre.length > 28 ? nombre.substring(0, 25) + '…' : nombre;
+      title.title = nombre;
+      body.appendChild(title);
+      if (tagLabels.length > 0) {
+        const tagRow = document.createElement('div');
+        tagRow.className = 'thumb-card-tags';
+        for (let k = 0; k < Math.min(3, tagLabels.length); k++) {
+          const chip = document.createElement('span');
+          chip.className = 'tag-chip-inline';
+          chip.textContent = tagLabels[k].replace(/</g, '\u200b');
+          tagRow.appendChild(chip);
+        }
+        if (tagLabels.length > 3) {
+          const more = document.createElement('span');
+          more.className = 'tag-chip-inline';
+          more.textContent = '+' + (tagLabels.length - 3);
+          tagRow.appendChild(more);
+        }
+        body.appendChild(tagRow);
+      }
+      a.appendChild(body);
+      card.appendChild(a);
+      col.appendChild(card);
+      gridResultadosModeracion.appendChild(col);
+    }
+  }
+
+  async function runBuscarModeracion(page) {
+    if (selectedModTags.size === 0) return;
+    const tagsParam = Array.from(selectedModTags).join(',');
+    const urlBuscar = appendWorkspace('?action=buscar_por_moderacion&tags=' + encodeURIComponent(tagsParam) + '&page=' + page + '&per_page=' + PER_PAGE_MOD);
+    if (stModeracionBuscar) stModeracionBuscar.textContent = 'Buscando…';
+    if (gridResultadosModeracion) gridResultadosModeracion.innerHTML = '';
+    if (paginacionModeracion) paginacionModeracion.classList.add('d-none');
+    const res = await getJsonRaw(urlBuscar);
+    if (stModeracionBuscar) stModeracionBuscar.textContent = '';
+    if (!res.ok || !res.data?.success) {
+      if (stModeracionBuscar) stModeracionBuscar.textContent = res.data?.error || 'Error';
+      return;
+    }
+    const imagenes = res.data.imagenes || [];
+    const total = res.data.total ?? 0;
+    const totalPages = res.data.total_pages ?? 1;
+    const currentPage = res.data.page ?? 1;
+    modCurrentPage = currentPage;
+    if (stModeracionBuscar) stModeracionBuscar.textContent = total + ' imagen(es)' + (totalPages > 1 ? ' · Página ' + currentPage + ' de ' + totalPages : '');
+    renderModerationResultsInline(imagenes);
+    if (paginacionModeracion && stPaginacionModeracion && btnModeracionPrev && btnModeracionNext) {
+      if (totalPages <= 1) {
+        paginacionModeracion.classList.add('d-none');
+      } else {
+        paginacionModeracion.classList.remove('d-none');
+        stPaginacionModeracion.textContent = 'Página ' + currentPage + ' de ' + totalPages;
+        btnModeracionPrev.disabled = currentPage <= 1;
+        btnModeracionNext.disabled = currentPage >= totalPages;
+      }
+    }
+  }
+
+  async function loadEtiquetasModeracion() {
+    if (!lstEtiquetasModeracion) return;
+    lstEtiquetasModeracion.innerHTML = '<span class="text-muted small">Cargando etiquetas…</span>';
+    const url = appendWorkspace('?action=etiquetas_moderacion');
+    const { ok, data } = await getJsonRaw(url);
+    if (!ok || !data?.success) {
+      const msg = (data?.error && (data.error.indexOf('workspace') !== -1 || data.error.indexOf('activo') !== -1)) ? 'Entra a un workspace (botón Entrar) para ver etiquetas de moderación.' : (data?.error || 'Sin etiquetas. Ejecuta "Clasificar moderación" primero.');
+      lstEtiquetasModeracion.innerHTML = '<span class="text-muted small">' + String(msg).replace(/</g, '&lt;') + '</span>';
+      return;
+    }
+    const etiquetasArray = Array.isArray(data.etiquetas) ? data.etiquetas : [];
+    if (etiquetasArray.length === 0) {
+      lstEtiquetasModeracion.innerHTML = '<span class="text-muted small">Sin etiquetas aún. Ejecuta "Clasificar moderación" primero.</span>';
+      return;
+    }
+    lstEtiquetasModeracion.innerHTML = '';
+    const etiquetas = etiquetasArray;
+    for (let i = 0; i < etiquetas.length; i++) {
+      const et = etiquetas[i];
+      const name = String(et.label_name || '').trim();
+      if (!name) continue;
+      const level = Number(et.taxonomy_level);
+      const count = Number(et.count) || 0;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'btn btn-sm mr-1 mb-1 tag-chip-moderation' + (selectedModTags.has(name) ? ' tag-chip-active' : '');
+      chip.textContent = 'Nivel ' + level + ': ' + name + ' (' + count + ')';
+      chip.dataset.labelName = name;
+      chip.addEventListener('click', async () => {
+        if (selectedModTags.has(name)) selectedModTags.delete(name);
+        else selectedModTags.add(name);
+        chip.classList.toggle('tag-chip-active', selectedModTags.has(name));
+        if (selectedModTags.size === 0) {
+          if (stModeracionBuscar) stModeracionBuscar.textContent = 'Selecciona una o más etiquetas para filtrar.';
+          if (gridResultadosModeracion) gridResultadosModeracion.innerHTML = '';
+          if (paginacionModeracion) paginacionModeracion.classList.add('d-none');
+          return;
+        }
+        modCurrentPage = 1;
+        runBuscarModeracion(1);
+      });
+      lstEtiquetasModeracion.appendChild(chip);
+    }
+    if (lstEtiquetasModeracion.children.length === 0) {
+      lstEtiquetasModeracion.innerHTML = '<span class="text-muted small">Sin etiquetas. Clasifica primero.</span>';
+    }
+  }
+  if (btnModeracionPrev) btnModeracionPrev.addEventListener('click', () => { if (modCurrentPage > 1) runBuscarModeracion(modCurrentPage - 1); });
+  if (btnModeracionNext) btnModeracionNext.addEventListener('click', () => { runBuscarModeracion(modCurrentPage + 1); });
+  if (lstEtiquetasModeracion) loadEtiquetasModeracion();
 
   const uploadFolderName = el('uploadFolderName');
   if (inpFolder && uploadFolderName) {
@@ -1140,7 +1460,7 @@ function pct($n, $d): int {
   // Visor "Ir a carpeta", canvas y resize están cableados en BuscadorModals.init()
 
   // Tablas auto (solo si existe)
-  const switchAutoTablas = document.getElementById('switchAutoTablas');
+  const btnDescargarRegistros = document.getElementById('btnDescargarRegistros');
   const stTablas = document.getElementById('stTablas');
 
   const lstTablas = document.getElementById('lstTablas');
@@ -1238,20 +1558,27 @@ function pct($n, $d): int {
     }
   }
 
+  function setBtnDescargarLabel(running) {
+    if (!btnDescargarRegistros) return;
+    const t = btnDescargarRegistros.querySelector('.btn-accion-text');
+    if (t) t.textContent = running ? 'Detener descarga' : 'Descargar registros';
+  }
+
   async function setAutoTablas(on) {
-    if (switchAutoTablas) switchAutoTablas.checked = !!on;
     if (!on) {
       autoTablasRunning = false;
+      setBtnDescargarLabel(false);
       if (indexWorker && window.APP_WORKSPACE) indexWorker.postMessage({ type: 'remove', mode: 'download', ws: window.APP_WORKSPACE });
       stopIndexAutoStatsPolling();
-      setStatus(stTablas, 'neutral', 'Auto detenido');
-      await appendLog('info', 'Auto tablas detenido.');
+      setStatus(stTablas, 'neutral', 'Detenido');
+      await appendLog('info', 'Descarga detenida.');
       await refreshLogPanel();
       return;
     }
     autoTablasRunning = true;
-    setStatus(stTablas, 'neutral', 'Auto en ejecución…');
-    await appendLog('info', 'Auto tablas iniciado.');
+    setBtnDescargarLabel(true);
+    setStatus(stTablas, 'neutral', 'Ejecutando…');
+    await appendLog('info', 'Descarga iniciada.');
     await refreshLogPanel();
     if (indexWorker && window.APP_WORKSPACE) {
       startIndexAutoStatsPolling();
@@ -1261,7 +1588,15 @@ function pct($n, $d): int {
     }
   }
 
-  if (switchAutoTablas) switchAutoTablas.addEventListener('change', () => setAutoTablas(switchAutoTablas.checked));
+  if (btnDescargarRegistros) {
+    btnDescargarRegistros.addEventListener('click', function () {
+      if (!window.APP_WORKSPACE) {
+        if (stTablas) stTablas.textContent = 'Entra desde una card de workspace (botón Entrar) para descargar.';
+        return;
+      }
+      setAutoTablas(!autoTablasRunning);
+    });
+  }
 
   // Log de procesamiento (actualización solo en momentos clave, sin polling)
   const logPanel = document.getElementById('logPanel');
@@ -1315,17 +1650,21 @@ function pct($n, $d): int {
 
   // Initial load
   (async () => {
+    // Cargar indicadores en cuanto haya workspace (prioritario)
+    refreshAccionesIndicadores();
     // Inicializar barras de progreso server-side (tablas)
     document.querySelectorAll('.tblProgress[data-width]').forEach((b) => {
       const p = Math.max(0, Math.min(100, Number(b.getAttribute('data-width') || '0')));
       b.style.width = p + '%';
     });
     await refreshStats();
+    await refreshAccionesIndicadores();
     await refreshLogPanel();
-    if (window.APP_AUTO === 'descargar' && switchAutoTablas) {
-      switchAutoTablas.checked = true;
+    if (window.APP_AUTO === 'descargar') {
       setAutoTablas(true);
     }
+    // Reintentar indicadores por si la primera llamada fue antes de tener contexto
+    setTimeout(function () { refreshAccionesIndicadores(); }, 400);
   })();
 </script>
 

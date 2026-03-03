@@ -83,6 +83,30 @@ class StorageEngineConfig
         if (!isset($data['registros_descarga'])) {
             $data['registros_descarga'] = 1;
         }
+        if (!isset($data['registros_moderacion'])) {
+            $data['registros_moderacion'] = 20;
+        }
+        self::writeData($data);
+    }
+
+    /**
+     * Número de imágenes a procesar por petición de moderación (global). Default 20, mínimo 1, máximo 100.
+     */
+    public static function getRegistrosModeracion(): int
+    {
+        $data = self::readData();
+        $n = isset($data['registros_moderacion']) ? (int) $data['registros_moderacion'] : 20;
+        return max(1, min(100, $n));
+    }
+
+    /**
+     * Persiste el número de imágenes por lote de moderación.
+     */
+    public static function setRegistrosModeracion(int $n): void
+    {
+        $n = max(1, min(100, $n));
+        $data = self::readData();
+        $data['registros_moderacion'] = $n;
         self::writeData($data);
     }
 
@@ -113,5 +137,25 @@ class StorageEngineConfig
     public static function sqlitePath(): string
     {
         return self::databaseDir() . DIRECTORY_SEPARATOR . 'clasificador.sqlite';
+    }
+
+    /**
+     * Lee la sección AWS del archivo de configuración (credenciales Rekognition, etc.).
+     * @return array{key?:string, secret?:string, region?:string, version?:string, min_confidence?:int|float}
+     */
+    public static function getAwsConfig(): array
+    {
+        $data = self::readData();
+        return isset($data['aws']) && is_array($data['aws']) ? $data['aws'] : [];
+    }
+
+    /**
+     * Persiste la sección AWS en el archivo de configuración (preserva el resto de claves).
+     */
+    public static function setAwsConfig(array $aws): void
+    {
+        $data = self::readData();
+        $data['aws'] = $aws;
+        self::writeData($data);
     }
 }

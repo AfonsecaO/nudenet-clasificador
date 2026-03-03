@@ -39,6 +39,11 @@ $__bodyClass = 'page-wizard';
                 <input type="number" id="registros_descarga" name="registros_descarga" class="form-control" min="1" max="1000" value="<?= (int) ($registros_descarga ?? 1) ?>" aria-describedby="registros_descarga_help">
                 <small id="registros_descarga_help" class="form-text text-muted">Número de registros a procesar por petición al descargar imágenes (1–1000).</small>
               </div>
+              <div class="form-group">
+                <label class="font-weight-bold" for="registros_moderacion">Registros por lote de moderación</label>
+                <input type="number" id="registros_moderacion" name="registros_moderacion" class="form-control" min="1" max="100" value="<?= (int) ($registros_moderacion ?? 20) ?>" aria-describedby="registros_moderacion_help">
+                <small id="registros_moderacion_help" class="form-text text-muted">Imágenes por petición al ejecutar Clasificar moderación (1–100).</small>
+              </div>
               <button type="submit" class="btn btn-primary">
                 <i class="fas fa-arrow-right"></i> Continuar
               </button>

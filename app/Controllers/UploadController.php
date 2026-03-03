@@ -7,6 +7,7 @@ use App\Services\HeicConverter;
 use App\Services\LogService;
 use App\Services\AppConnection;
 use App\Services\AppSchema;
+use App\Services\StringNormalizer;
 use App\Services\WorkspaceService;
 
 class UploadController extends BaseController
@@ -179,6 +180,12 @@ class UploadController extends BaseController
 
                 $rel = $this->sanitizeRelativePath($pathForRel);
                 if ($rel === null) {
+                    $out['skipped_invalid']++;
+                    continue;
+                }
+                // Materializar con nombres normalizados (evita 403 y problemas con espacios/caracteres especiales)
+                $rel = StringNormalizer::normalizeRelativePath($rel);
+                if ($rel === '') {
                     $out['skipped_invalid']++;
                     continue;
                 }

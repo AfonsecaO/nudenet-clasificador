@@ -1,14 +1,16 @@
 /**
- * Web Worker: descarga por workspaces.
+ * Web Worker: descarga por workspaces y moderación (clasificar Rekognition).
  * Sin polling: la UI se actualiza con cada mensaje 'tick'.
  */
 const downloadSet = new Set();
+const classifySet = new Set();
 let stopRequested = false;
 let baseUrl = '';
 const downloadRunning = new Set();
+const classifyRunning = new Set();
 
 function buildUrl(action, ws) {
-  const params = `action=${encodeURIComponent(action)}&workspace=${encodeURIComponent(ws)}`;
+  const params = ws != null ? `action=${encodeURIComponent(action)}&workspace=${encodeURIComponent(ws)}` : `action=${encodeURIComponent(action)}`;
   if (!baseUrl) return '?' + params;
   const sep = baseUrl.indexOf('?') >= 0 ? '&' : '?';
   return baseUrl + sep + params;
@@ -21,7 +23,6 @@ async function fetchJson(url) {
 }
 
 async function runDownloadLoop(ws) {
-  // Única condición: la siguiente petición solo se inicia cuando la anterior haya finalizado (éxito, error o complete).
   while (!stopRequested && downloadSet.has(ws)) {
     const url = buildUrl('procesar', ws);
     const t0 = Date.now();
@@ -29,7 +30,6 @@ async function runDownloadLoop(ws) {
     const durationMs = Date.now() - t0;
     self.postMessage({ type: 'tick', mode: 'download', ws, ok, data, durationMs });
     if (!ok || !data?.success) break;
-    // Solo terminar cuando no se procesó registro Y ya no faltan registros (id <= max_id); si hay huecos, registro_procesado puede ser false pero faltan_registros true
     const noMoreWork = data?.registro_procesado === false && !data?.faltan_registros;
     if (noMoreWork) {
       downloadSet.delete(ws);
@@ -39,13 +39,38 @@ async function runDownloadLoop(ws) {
   }
 }
 
-/** Inicia descarga para este workspace si está en cola y no tiene descarga activa. */
+async function runClassifyLoop(ws) {
+  while (!stopRequested && classifySet.has(ws)) {
+    const url = buildUrl('procesar_moderacion', ws);
+    const t0 = Date.now();
+    const { ok, data } = await fetchJson(url);
+    const durationMs = Date.now() - t0;
+    self.postMessage({ type: 'tick', mode: 'classify', ws, ok, data, durationMs });
+    if (!ok || !data?.success) break;
+    const noMoreWork = !data?.faltan_mas;
+    if (noMoreWork) {
+      classifySet.delete(ws);
+      self.postMessage({ type: 'done', mode: 'classify', ws });
+      break;
+    }
+  }
+}
+
 function tryStartDownload(ws) {
   if (downloadRunning.has(ws) || !downloadSet.has(ws)) return;
   downloadRunning.add(ws);
   runDownloadLoop(ws).finally(() => {
     downloadRunning.delete(ws);
     if (downloadSet.has(ws)) tryStartDownload(ws);
+  });
+}
+
+function tryStartClassify(ws) {
+  if (classifyRunning.has(ws) || !classifySet.has(ws)) return;
+  classifyRunning.add(ws);
+  runClassifyLoop(ws).finally(() => {
+    classifyRunning.delete(ws);
+    if (classifySet.has(ws)) tryStartClassify(ws);
   });
 }
 
@@ -61,20 +86,26 @@ self.onmessage = function (e) {
       if (msg.mode === 'download' && msg.ws) {
         downloadSet.add(msg.ws);
         tryStartDownload(msg.ws);
-        self.postMessage({ type: 'state', download: [...downloadSet], classify: [] });
+        self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
+      } else if (msg.mode === 'classify' && msg.ws) {
+        classifySet.add(msg.ws);
+        tryStartClassify(msg.ws);
+        self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
       }
       break;
     case 'remove':
       if (msg.mode === 'download' && msg.ws) downloadSet.delete(msg.ws);
-      self.postMessage({ type: 'state', download: [...downloadSet], classify: [] });
+      if (msg.mode === 'classify' && msg.ws) classifySet.delete(msg.ws);
+      self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
       break;
     case 'stopAll':
       stopRequested = true;
       downloadSet.clear();
+      classifySet.clear();
       self.postMessage({ type: 'state', download: [], classify: [] });
       break;
     case 'getState':
-      self.postMessage({ type: 'state', download: [...downloadSet], classify: [] });
+      self.postMessage({ type: 'state', download: [...downloadSet], classify: [...classifySet] });
       break;
     default:
       break;

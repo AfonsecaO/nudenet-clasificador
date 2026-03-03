@@ -60,6 +60,8 @@ function fmtTs($ts): string {
           $createdAt = fmtTs($ws['created_at'] ?? null);
           $updatedAt = (string)($ws['updated_at'] ?? '');
           $modeLabel = ($mode === 'db_and_images') ? 'DB + imágenes' : (($mode === 'images_only') ? 'Solo imágenes' : 'Sin configurar');
+          $imagenesPendMod = isset($ws['imagenes_pendientes_moderacion']) ? (int)$ws['imagenes_pendientes_moderacion'] : null;
+          $porModerarNum = $configured ? ($imagenesPendMod !== null ? $imagenesPendMod : 0) : null;
         ?>
         <article class="ws-card<?php echo $isCurrent ? ' ws-card--current' : ''; ?> <?php echo $configured ? 'ws-card--ok' : 'ws-card--pending'; ?>" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
           <div class="ws-card-inner">
@@ -84,27 +86,39 @@ function fmtTs($ts): string {
               <span class="ws-badge ws-badge--<?php echo $configured ? 'ok' : 'warn'; ?>"><?php echo $configured ? 'Configurado' : 'Pendiente'; ?></span>
               <span class="ws-badge ws-badge--mode"><?php echo htmlspecialchars($modeLabel, ENT_QUOTES); ?></span>
             </div>
-            <?php if ($imgTotal !== null || $registrosPendDescarga !== null): ?>
+            <?php if ($imgTotal !== null || $registrosPendDescarga !== null || $porModerarNum !== null): ?>
             <div class="ws-card-stats" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
               <div class="ws-stat"><span class="ws-stat-num" data-stat="images"><?php echo $imgTotal !== null ? number_format($imgTotal) : '—'; ?></span><span class="ws-stat-lbl"><i class="fas fa-image"></i> Imágenes</span></div>
+              <?php if ($porModerarNum !== null): ?>
+              <div class="ws-stat ws-stat-full" title="Imágenes aún no procesadas con Rekognition"><span class="ws-stat-num" data-stat="moderacion-pend"><?php echo number_format($porModerarNum); ?></span><span class="ws-stat-lbl"><i class="fas fa-shield-alt"></i> Por moderar</span></div>
+              <?php endif; ?>
               <div class="ws-stat ws-stat-errores-hint" style="display:none"><span class="ws-stat-num" data-stat="errores">0</span><span class="ws-stat-lbl"><i class="fas fa-exclamation-circle"></i> Error</span></div>
               <?php if ($mode === 'db_and_images' && $registrosPendDescarga !== null): ?>
-              <div class="ws-stat ws-stat-full"><span class="ws-stat-num" data-stat="registros-descarga"><?php echo number_format($registrosPendDescarga); ?></span><span class="ws-stat-lbl"><i class="fas fa-download"></i> Registros por descargar</span></div>
+              <div class="ws-stat ws-stat-full ws-stat-col12"><span class="ws-stat-num" data-stat="registros-descarga"><?php echo number_format($registrosPendDescarga); ?></span><span class="ws-stat-lbl"><i class="fas fa-download"></i> Registros por descargar</span></div>
               <?php endif; ?>
             </div>
             <?php endif; ?>
             <div class="ws-card-actions">
-              <button class="btn btn-primary btn-sm btnEnterWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
-                <i class="fas fa-arrow-right"></i> Entrar
-              </button>
-              <button class="btn btn-outline-secondary btn-sm btnSetupWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Parametrización">
-                <i class="fas fa-cog"></i> Parametrización
-              </button>
-              <?php if ($configured && $mode === 'db_and_images'): ?>
-              <button type="button" class="btn btn-outline-info btn-sm btn-worker btnWsDescargar ws-card-actions-btn-descargar" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Descargar tablas aquí">
-                <i class="fas fa-download"></i> Descargar
-              </button>
-              <?php endif; ?>
+              <div class="ws-card-actions-row ws-card-actions-row--top">
+                <button class="btn btn-outline-secondary btn-sm btnSetupWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Parametrización">
+                  <i class="fas fa-cog"></i> Parametrización
+                </button>
+                <button class="btn btn-primary btn-sm btnEnterWs" type="button" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>">
+                  <i class="fas fa-arrow-right"></i> Entrar
+                </button>
+              </div>
+              <div class="ws-card-actions-row ws-card-actions-row--bottom">
+                <?php if ($configured && $mode === 'db_and_images'): ?>
+                <button type="button" class="btn btn-outline-info btn-sm btn-worker btnWsDescargar ws-card-actions-btn-descargar" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Descargar tablas aquí">
+                  <i class="fas fa-download"></i> Descargar
+                </button>
+                <?php endif; ?>
+                <?php if ($configured): ?>
+                <button type="button" class="btn btn-outline-info btn-sm btn-worker btnWsModeracion ws-card-actions-btn-moderacion" data-ws="<?php echo htmlspecialchars($slug, ENT_QUOTES); ?>" title="Clasificar moderación Rekognition en este workspace">
+                  <i class="fas fa-shield-alt"></i> Moderación
+                </button>
+                <?php endif; ?>
+              </div>
             </div>
           </div>
         </article>
@@ -253,12 +267,7 @@ function fmtTs($ts): string {
       </div>
       <div class="modal-body modal-visor-body">
         <div class="visor-toolbar" role="toolbar" aria-label="Acciones de la imagen">
-          <div class="visor-toolbar-left">
-            <div class="custom-control custom-switch">
-              <input type="checkbox" class="custom-control-input" id="swBoxes" checked>
-              <label class="custom-control-label" for="swBoxes">Bounding boxes</label>
-            </div>
-          </div>
+          <div class="visor-toolbar-left"></div>
           <span class="visor-toolbar-divider" aria-hidden="true"></span>
           <div class="visor-toolbar-buttons">
             <button type="button" class="btn btn-sm visor-btn visor-btn-folder" id="btnVisorAbrirCarpeta" title="Ir a la carpeta que contiene esta imagen" aria-label="Ir a carpeta">
@@ -332,6 +341,7 @@ function fmtTs($ts): string {
 
   // --- Procesamiento en la misma pantalla con Web Worker (ejecución paralela) ---
   const downloadQueue = new Set();
+  const classifyQueue = new Set();
   const panelEl = document.getElementById('workspaceProcessingPanel');
   const listEl = null;
   const btnStopAll = null;
@@ -369,6 +379,7 @@ function fmtTs($ts): string {
   function syncQueuesFromState(state) {
     if (!state) return;
     if (Array.isArray(state.download)) { downloadQueue.clear(); state.download.forEach((ws) => downloadQueue.add(ws)); }
+    if (Array.isArray(state.classify)) { classifyQueue.clear(); state.classify.forEach((ws) => classifyQueue.add(ws)); }
   }
 
   const lastButtonMetrics = {}; // ws -> { descargar: string }
@@ -388,6 +399,7 @@ function fmtTs($ts): string {
     btn.disabled = false;
     btn.classList.remove('ws-btn-processing');
     if (type === 'descargar') btn.innerHTML = '<i class="fas fa-download"></i> Descargar';
+    if (type === 'moderacion') btn.innerHTML = '<i class="fas fa-shield-alt"></i> Moderación';
     const stopWrap = btn.nextElementSibling;
     if (stopWrap && stopWrap.classList.contains('ws-btn-stop-wrap')) stopWrap.remove();
   }
@@ -400,6 +412,14 @@ function fmtTs($ts): string {
         setButtonProcessing(btn, 'descargar', metrics);
       } else {
         setButtonIdle(btn, 'descargar');
+      }
+    });
+    document.querySelectorAll('.btnWsModeracion[data-ws]').forEach((btn) => {
+      const ws = btn.getAttribute('data-ws');
+      if (classifyQueue.has(ws)) {
+        setButtonProcessing(btn, 'moderacion', 'Clasificando…');
+      } else {
+        setButtonIdle(btn, 'moderacion');
       }
     });
   }
@@ -440,31 +460,96 @@ function fmtTs($ts): string {
       const n = extra?.imagenes_totales ?? 0;
       return `Imágenes: ${Number(n).toLocaleString()}`;
     }
+    if (type === 'moderacion') {
+      const p = extra?.procesadas ?? 0;
+      const pend = extra?.pendientes ?? 0;
+      return `${Number(p).toLocaleString()} ok, ${Number(pend).toLocaleString()} pend.`;
+    }
     return '—';
   }
 
   function updateButtonMetricsLabel(ws, type, metricsText) {
     lastButtonMetrics[ws] = lastButtonMetrics[ws] || {};
     lastButtonMetrics[ws][type] = metricsText;
-    const sel = type === 'descargar' ? '.btnWsDescargar' : '.btnWsClasificar';
+    const sel = type === 'descargar' ? '.btnWsDescargar' : (type === 'moderacion' ? '.btnWsModeracion' : '.btnWsClasificar');
     const btn = document.querySelector(`${sel}[data-ws="${ws}"]`);
     if (!btn || !btn.classList.contains('ws-btn-processing')) return;
     const text = (metricsText && metricsText.trim()) ? metricsText.trim() : '—';
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1" aria-hidden="true"></i>' + text.replace(/</g, '&lt;');
   }
 
+  const lastRefreshModeracionByWs = {};
+  const REFRESH_MODERACION_THROTTLE_MS = 2000;
+  function refreshModeracionPendiente(ws) {
+    if (!ws) return;
+    getJson(apiUrlWs('estadisticas_moderacion', ws)).then(function (r) {
+      if (r.ok && r.data?.success && typeof r.data.pendientes === 'number') {
+        const el = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="moderacion-pend"]');
+        if (el) el.textContent = Number(r.data.pendientes).toLocaleString();
+      }
+    });
+  }
+  function refreshModeracionPendienteThrottled(ws) {
+    const now = Date.now();
+    if (lastRefreshModeracionByWs[ws] && (now - lastRefreshModeracionByWs[ws]) < REFRESH_MODERACION_THROTTLE_MS) return;
+    lastRefreshModeracionByWs[ws] = now;
+    refreshModeracionPendiente(ws);
+  }
+
   function applyTickToPanel(msg) {
     const { mode, ws, data } = msg;
-    if (!data || !ws || mode !== 'download') return;
-    if (typeof data.pendientes === 'number') {
-      const registrosEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="registros-descarga"]');
-      if (registrosEl) registrosEl.textContent = Number(data.pendientes).toLocaleString();
+    if (!data || !ws) return;
+    if (mode === 'download') {
+      const ind = data?.indicadores;
+      if (ind) {
+        if (typeof ind.registros_pendientes_descarga === 'number') {
+          const registrosEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="registros-descarga"]');
+          if (registrosEl) registrosEl.textContent = Number(ind.registros_pendientes_descarga).toLocaleString();
+        }
+        if (typeof ind.imagenes_pendientes_moderacion === 'number') {
+          const modEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="moderacion-pend"]');
+          if (modEl) modEl.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
+        }
+        if (typeof ind.imagenes_total === 'number') {
+          const imgEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="images"]');
+          if (imgEl) imgEl.textContent = Number(ind.imagenes_total).toLocaleString();
+        }
+      } else {
+        if (typeof data.pendientes === 'number') {
+          const registrosEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="registros-descarga"]');
+          if (registrosEl) registrosEl.textContent = Number(data.pendientes).toLocaleString();
+        }
+        refreshModeracionPendienteThrottled(ws);
+      }
+      const stats = data?.clasificacion_stats;
+      const imagenes = stats && (typeof stats.total === 'number') ? stats.total : null;
+      const metricsText = formatMetrics('descargar', null, { imagenes_totales: imagenes ?? 0 });
+      updateButtonMetricsLabel(ws, 'descargar', metricsText);
+      if (stats) updateCardStats(ws, { total: stats.total, pendientes: stats.pendientes, pendientes_deteccion: stats.pendientes_deteccion ?? stats.pendientes });
+      return;
     }
-    const stats = data?.clasificacion_stats;
-    const imagenes = stats && (typeof stats.total === 'number') ? stats.total : null;
-    const metricsText = formatMetrics('descargar', null, { imagenes_totales: imagenes ?? 0 });
-    updateButtonMetricsLabel(ws, 'descargar', metricsText);
-    if (stats) updateCardStats(ws, { total: stats.total, pendientes: stats.pendientes, pendientes_deteccion: stats.pendientes_deteccion ?? stats.pendientes });
+    if (mode === 'classify') {
+      const ind = data?.indicadores;
+      if (ind) {
+        if (typeof ind.imagenes_pendientes_moderacion === 'number') {
+          const moderacionPendEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="moderacion-pend"]');
+          if (moderacionPendEl) moderacionPendEl.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
+        }
+        if (typeof ind.registros_pendientes_descarga === 'number') {
+          const registrosEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="registros-descarga"]');
+          if (registrosEl) registrosEl.textContent = Number(ind.registros_pendientes_descarga).toLocaleString();
+        }
+        if (typeof ind.imagenes_total === 'number') {
+          const imgEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="images"]');
+          if (imgEl) imgEl.textContent = Number(ind.imagenes_total).toLocaleString();
+        }
+      } else if (typeof data.pendientes === 'number') {
+        const moderacionPendEl = document.querySelector('.ws-card-stats[data-ws="' + CSS.escape(ws) + '"] .ws-stat-num[data-stat="moderacion-pend"]');
+        if (moderacionPendEl) moderacionPendEl.textContent = Number(data.pendientes).toLocaleString();
+      }
+      const metricsText = formatMetrics('moderacion', null, { procesadas: data.procesadas ?? 0, pendientes: data.pendientes ?? 0 });
+      updateButtonMetricsLabel(ws, 'moderacion', metricsText);
+    }
   }
 
   if (worker) {
@@ -474,7 +559,11 @@ function fmtTs($ts): string {
         syncQueuesFromState(msg);
         updateProcessingPanel();
       } else if (msg?.type === 'done') {
-        if (msg.mode === 'download') downloadQueue.delete(msg.ws);
+        if (msg.mode === 'download') {
+          downloadQueue.delete(msg.ws);
+          refreshModeracionPendiente(msg.ws);
+        }
+        if (msg.mode === 'classify') classifyQueue.delete(msg.ws);
         updateProcessingPanel();
       } else if (msg?.type === 'tick') {
         applyTickToPanel(msg);
@@ -496,6 +585,22 @@ function fmtTs($ts): string {
       updateProcessingPanel();
       if (worker) worker.postMessage({ type: 'add', mode: 'download', ws });
       else { mainThreadStopRequested = false; runDownloadLoopMain(ws); }
+    });
+  });
+
+  document.querySelectorAll('.btnWsModeracion[data-ws]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const ws = btn.getAttribute('data-ws');
+      if (!ws) return;
+      if (classifyQueue.has(ws)) {
+        classifyQueue.delete(ws);
+        if (worker) worker.postMessage({ type: 'remove', mode: 'classify', ws });
+        updateProcessingPanel();
+        return;
+      }
+      classifyQueue.add(ws);
+      updateProcessingPanel();
+      if (worker) worker.postMessage({ type: 'add', mode: 'classify', ws });
     });
   });
   // Detener todos: ya no hay barra global; cada botón tiene su "Detener"
@@ -664,7 +769,6 @@ function fmtTs($ts): string {
             ttlImagenWrap: document.getElementById('ttlImagenWrap'),
             lnkAbrirOriginal: document.getElementById('lnkAbrirOriginal'),
             btnVisorAbrirCarpeta: document.getElementById('btnVisorAbrirCarpeta'),
-            swBoxes: document.getElementById('swBoxes'),
             badgesDet: document.getElementById('badgesDet'),
             cnv: document.getElementById('cnv'),
             stVisor: document.getElementById('stVisor'),
@@ -675,10 +779,172 @@ function fmtTs($ts): string {
 
     function expandirBuscadorGlobal(quien) {
       if (!wsSearchAcordeon) return;
-      wsSearchAcordeon.classList.remove('expanded-carpetas', 'expanded-etiquetas');
+      wsSearchAcordeon.classList.remove('expanded-carpetas', 'expanded-etiquetas', 'expanded-moderacion');
       if (quien === 'carpetas') wsSearchAcordeon.classList.add('expanded-carpetas');
       else if (quien === 'etiquetas') wsSearchAcordeon.classList.add('expanded-etiquetas');
+      else if (quien === 'moderacion') {
+        wsSearchAcordeon.classList.add('expanded-moderacion');
+        if (typeof loadEtiquetasModeracionGlobal === 'function') loadEtiquetasModeracionGlobal();
+      }
     }
+
+    const lstEtiquetasModeracionGlobal = document.getElementById('lstEtiquetasModeracionGlobal');
+    const stModeracionBuscarGlobal = document.getElementById('stModeracionBuscarGlobal');
+    const gridResultadosModeracionGlobal = document.getElementById('gridResultadosModeracionGlobal');
+    const selectedModTagsGlobal = new Set();
+    const paginacionModeracionGlobal = document.getElementById('paginacionModeracionGlobal');
+    const stPaginacionModeracionGlobal = document.getElementById('stPaginacionModeracionGlobal');
+    const btnModeracionPrevGlobal = document.getElementById('btnModeracionPrevGlobal');
+    const btnModeracionNextGlobal = document.getElementById('btnModeracionNextGlobal');
+    let modCurrentPageGlobal = 1;
+    const PER_PAGE_MOD_GLOBAL = 60;
+
+    async function loadEtiquetasModeracionGlobal() {
+      if (!lstEtiquetasModeracionGlobal) return;
+      lstEtiquetasModeracionGlobal.innerHTML = '<span class="text-muted small">Cargando etiquetas de todos los workspaces…</span>';
+      const url = apiUrl('etiquetas_moderacion', { global: '1' });
+      const { ok, data } = await getJson(url);
+      if (!ok || !data?.success) {
+        const msg = data?.error || 'No se pudieron cargar las etiquetas.';
+        lstEtiquetasModeracionGlobal.innerHTML = '<span class="text-muted small">' + String(msg).replace(/</g, '&lt;') + '</span>';
+        return;
+      }
+      const etiquetasArray = Array.isArray(data.etiquetas) ? data.etiquetas : [];
+      if (etiquetasArray.length === 0) {
+        lstEtiquetasModeracionGlobal.innerHTML = '<span class="text-muted small">Sin etiquetas aún. Ejecuta "Clasificar moderación" en algún workspace.</span>';
+        return;
+      }
+      lstEtiquetasModeracionGlobal.innerHTML = '';
+      for (let i = 0; i < etiquetasArray.length; i++) {
+        const et = etiquetasArray[i];
+        const name = String(et.label_name || '').trim();
+        if (!name) continue;
+        const level = Number(et.taxonomy_level);
+        const count = Number(et.count) || 0;
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'btn btn-sm mr-1 mb-1 tag-chip-moderation' + (selectedModTagsGlobal.has(name) ? ' tag-chip-active' : '');
+        chip.textContent = 'Nivel ' + level + ': ' + name + ' (' + count + ')';
+        chip.dataset.labelName = name;
+        chip.addEventListener('click', async function () {
+          if (selectedModTagsGlobal.has(name)) selectedModTagsGlobal.delete(name);
+          else selectedModTagsGlobal.add(name);
+          chip.classList.toggle('tag-chip-active', selectedModTagsGlobal.has(name));
+          if (selectedModTagsGlobal.size === 0) {
+            if (stModeracionBuscarGlobal) stModeracionBuscarGlobal.textContent = 'Selecciona una o más etiquetas para filtrar.';
+            if (gridResultadosModeracionGlobal) gridResultadosModeracionGlobal.innerHTML = '';
+            if (paginacionModeracionGlobal) paginacionModeracionGlobal.classList.add('d-none');
+            return;
+          }
+          modCurrentPageGlobal = 1;
+          runBuscarModeracionGlobal(1);
+        });
+        lstEtiquetasModeracionGlobal.appendChild(chip);
+      }
+    }
+
+    async function runBuscarModeracionGlobal(page) {
+      if (selectedModTagsGlobal.size === 0) return;
+      const tagsParam = Array.from(selectedModTagsGlobal).join(',');
+      if (stModeracionBuscarGlobal) stModeracionBuscarGlobal.textContent = 'Buscando en todos los workspaces…';
+      if (gridResultadosModeracionGlobal) gridResultadosModeracionGlobal.innerHTML = '';
+      if (paginacionModeracionGlobal) paginacionModeracionGlobal.classList.add('d-none');
+      const res = await getJson(apiUrl('buscar_por_moderacion', { tags: tagsParam, global: '1', page: page, per_page: PER_PAGE_MOD_GLOBAL }));
+      const data = res.data;
+      if (stModeracionBuscarGlobal) stModeracionBuscarGlobal.textContent = '';
+      if (!res.ok || !data?.success) {
+        if (stModeracionBuscarGlobal) stModeracionBuscarGlobal.textContent = data?.error || 'Error';
+        return;
+      }
+      const imagenes = data.imagenes || [];
+      const total = data.total ?? 0;
+      const totalPages = data.total_pages ?? 1;
+      const currentPage = data.page ?? 1;
+      modCurrentPageGlobal = currentPage;
+      if (stModeracionBuscarGlobal) stModeracionBuscarGlobal.textContent = total + ' imagen(es)' + (totalPages > 1 ? ' · Página ' + currentPage + ' de ' + totalPages : '');
+      renderModerationResultsInlineGlobal(imagenes);
+      if (paginacionModeracionGlobal && stPaginacionModeracionGlobal && btnModeracionPrevGlobal && btnModeracionNextGlobal) {
+        if (totalPages <= 1) {
+          paginacionModeracionGlobal.classList.add('d-none');
+        } else {
+          paginacionModeracionGlobal.classList.remove('d-none');
+          stPaginacionModeracionGlobal.textContent = 'Página ' + currentPage + ' de ' + totalPages;
+          btnModeracionPrevGlobal.disabled = currentPage <= 1;
+          btnModeracionNextGlobal.disabled = currentPage >= totalPages;
+        }
+      }
+    }
+
+    function renderModerationResultsInlineGlobal(imagenes) {
+      if (!gridResultadosModeracionGlobal) return;
+      gridResultadosModeracionGlobal.innerHTML = '';
+      if (!Array.isArray(imagenes) || imagenes.length === 0) return;
+      for (let i = 0; i < imagenes.length; i++) {
+        const img = imagenes[i];
+        const nombre = String(img.filename || img.archivo || '').trim() || '—';
+        const rutaRel = String(img.relative_path || '').trim();
+        const folderPath = String(img.folder_path || '').trim();
+        const ws = String(img.workspace_slug || '').trim();
+        const modLabels = Array.isArray(img.moderation_labels) ? img.moderation_labels : [];
+        const tagLabels = modLabels.map(function (ml) {
+          const mn = (ml && ml.name) ? String(ml.name).trim() : '';
+          const conf = ml && ml.confidence != null ? Number(ml.confidence).toFixed(0) + '%' : '';
+          return mn ? (mn + (conf ? ' ' + conf : '')) : '';
+        }).filter(Boolean);
+        const col = document.createElement('div');
+        col.className = 'col-6 col-sm-4 col-md-3 col-lg-2 mb-3';
+        const card = document.createElement('div');
+        card.className = 'thumb-card';
+        const a = document.createElement('a');
+        a.href = '#';
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          if (window.BuscadorModals && window.BuscadorModals.openVisor) {
+            window.BuscadorModals.openVisor(folderPath, nombre, rutaRel, ws);
+          }
+        });
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'thumb-card-img';
+        const thumbImg = document.createElement('img');
+        thumbImg.alt = nombre;
+        thumbImg.loading = 'lazy';
+        const thumbUrl = apiUrl('ver_imagen', { ruta: folderPath, archivo: nombre, thumb: 1, w: 240, workspace: ws });
+        thumbImg.src = thumbUrl;
+        imgWrap.appendChild(thumbImg);
+        a.appendChild(imgWrap);
+        const body = document.createElement('div');
+        body.className = 'thumb-card-body';
+        const title = document.createElement('div');
+        title.className = 'thumb-card-title';
+        title.textContent = (ws ? ws + ' · ' : '') + (nombre.length > 22 ? nombre.substring(0, 19) + '…' : nombre);
+        title.title = nombre;
+        body.appendChild(title);
+        if (tagLabels.length > 0) {
+          const tagRow = document.createElement('div');
+          tagRow.className = 'thumb-card-tags';
+          for (let k = 0; k < Math.min(3, tagLabels.length); k++) {
+            const sp = document.createElement('span');
+            sp.className = 'tag-chip-inline';
+            sp.textContent = tagLabels[k].replace(/</g, '\u200b');
+            tagRow.appendChild(sp);
+          }
+          if (tagLabels.length > 3) {
+            const more = document.createElement('span');
+            more.className = 'tag-chip-inline';
+            more.textContent = '+' + (tagLabels.length - 3);
+            tagRow.appendChild(more);
+          }
+          body.appendChild(tagRow);
+        }
+        a.appendChild(body);
+        card.appendChild(a);
+        col.appendChild(card);
+        gridResultadosModeracionGlobal.appendChild(col);
+      }
+    }
+
+    if (btnModeracionPrevGlobal) btnModeracionPrevGlobal.addEventListener('click', function () { if (modCurrentPageGlobal > 1) runBuscarModeracionGlobal(modCurrentPageGlobal - 1); });
+    if (btnModeracionNextGlobal) btnModeracionNextGlobal.addEventListener('click', function () { runBuscarModeracionGlobal(modCurrentPageGlobal + 1); });
 
     // Buscar por carpeta
     async function buscarCarpetasGlobal(bypassMinLength) {

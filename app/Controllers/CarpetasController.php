@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Models\CarpetasIndex;
+use App\Models\ImageModerationLabels;
 use PDO;
 use App\Services\StringNormalizer;
 use App\Services\AppConnection;
@@ -358,6 +359,17 @@ class CarpetasController extends BaseController
             $stmtImg->execute([':ws' => $ws, ':rc' => $rutaNorm]);
             $imgRows = $stmtImg->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
+            $labelsByPath = [];
+            if (!empty($imgRows)) {
+                $modelLabels = new ImageModerationLabels();
+                foreach ($imgRows as $r) {
+                    $rrel = (string)($r['relative_path'] ?? '');
+                    if ($rrel !== '') {
+                        $labelsByPath[$rrel] = $modelLabels->getForImage($ws, $rrel);
+                    }
+                }
+            }
+
             $archivosInfo = [];
             $extensionesImagen = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'avif', 'heic', 'heif', 'ico', 'svg'];
 
@@ -372,6 +384,7 @@ class CarpetasController extends BaseController
                 }
                 $extension = strtolower(pathinfo($archivo, PATHINFO_EXTENSION));
                 $esImagen = in_array($extension, $extensionesImagen);
+                $moderationLabels = $labelsByPath[$rrel] ?? [];
 
                 $archivosInfo[] = [
                     'nombre' => $archivo,
@@ -380,7 +393,8 @@ class CarpetasController extends BaseController
                     'tamano' => $tamano,
                     'ruta_relativa' => $rrel,
                     'pendiente' => false,
-                    'tags' => []
+                    'tags' => [],
+                    'moderation_labels' => $moderationLabels
                 ];
             }
 

@@ -2,10 +2,12 @@
 
 namespace App\Controllers;
 
+use App\Services\AppConnection;
 use App\Services\LogService;
 use App\Services\ProcesadorTablas;
 use App\Services\MaterializadorImagenes;
 use App\Services\TablasLiveService;
+use App\Services\WorkspaceService;
 use App\Models\EstadoTracker;
 use App\Models\ImagenesIndex;
 
@@ -115,9 +117,16 @@ class ProcesarController extends BaseController
 
                 try {
                     $primaryKey = \App\Services\ConfigService::obtenerRequerido('PRIMARY_KEY');
+                    $batchRegistros = 0;
+                    $batchImagenesNuevas = 0;
+                    $batchDuplicadas = 0;
+                    $batchErroresImagen = 0;
+                    $batchRegistrosConError = 0;
+
                     foreach ($registros as $registro) {
                         $registroProcesado = true;
                         $procesadosEnPeticion++;
+                        $batchRegistros++;
                         try {
                             $registroId = isset($registro[$primaryKey]) ? (is_numeric($registro[$primaryKey]) ? (int) $registro[$primaryKey] : $registro[$primaryKey]) : null;
                         } catch (\Exception $e) {
@@ -139,12 +148,14 @@ class ProcesarController extends BaseController
                         foreach ($resultadosImagenes as $columna => $resultadoImg) {
                             if (!empty($resultadoImg['duplicate'])) {
                                 $totalDuplicadas++;
+                                $batchDuplicadas++;
                                 $duplicadasCols[] = (string) $columna;
                                 continue;
                             }
                             if (($resultadoImg['success'] ?? false) === true) {
                                 if (!empty($resultadoImg['ruta'])) {
                                     $totalImagenes++;
+                                    $batchImagenesNuevas++;
                                     $rutasGuardadas[] = $resultadoImg['ruta'];
                                     if (!empty($resultadoImg['raw_md5'])) {
                                         $rawMd5PorRuta[$resultadoImg['ruta']] = $resultadoImg['raw_md5'];
@@ -153,6 +164,12 @@ class ProcesarController extends BaseController
                             } else {
                                 $erroresImagenes[] = $columna . ': ' . ($resultadoImg['error'] ?? 'Error desconocido');
                             }
+                        }
+
+                        $countErroresRegistro = count($erroresImagenes);
+                        if ($countErroresRegistro > 0) {
+                            $batchErroresImagen += $countErroresRegistro;
+                            $batchRegistrosConError++;
                         }
 
                         if (!empty($rutasGuardadas)) {
@@ -165,15 +182,23 @@ class ProcesarController extends BaseController
                                 $clasificacionStats = null;
                             }
                         }
-
-                        $valorId = ($registroId !== null) ? (string) $registroId : '—';
-                        $countErrores = count($erroresImagenes);
-                        $mensaje = $tabla . ' | ID:' . $valorId . ' | M:' . $totalImagenes . ' | E:' . $countErrores;
-                        LogService::append([
-                            'type' => $totalImagenes > 0 ? 'success' : ($countErrores > 0 ? 'warning' : 'info'),
-                            'message' => $mensaje,
-                        ]);
                     }
+
+                    $mensajeBatch = sprintf(
+                        '%s [%s–%s]: %d registros, %d imágenes nuevas, %d duplicadas, %d errores (%d reg. con error)',
+                        $tablaProcesada,
+                        $range['id_min'],
+                        $range['id_max'],
+                        $batchRegistros,
+                        $batchImagenesNuevas,
+                        $batchDuplicadas,
+                        $batchErroresImagen,
+                        $batchRegistrosConError
+                    );
+                    LogService::append([
+                        'type' => $batchImagenesNuevas > 0 ? 'success' : ($batchErroresImagen > 0 ? 'warning' : 'info'),
+                        'message' => $mensajeBatch,
+                    ]);
 
                     $estadoTracker->markBatchCompleted($tablaProcesada, $range['id_min'], $range['id_max']);
                     $estadoTracker->purgeCompletedClaims();
@@ -193,6 +218,27 @@ class ProcesarController extends BaseController
                 $registrosProcesados += (int)($info['ultimo_id'] ?? 0);
             }
             $pendientesDescarga = max(0, $totalRegistros - $registrosProcesados);
+
+            $imagenesTotal = null;
+            $imagenesPendientesModeracion = null;
+            try {
+                $wsSlug = WorkspaceService::current();
+                if ($wsSlug !== null && $wsSlug !== '') {
+                    $pdo = AppConnection::get();
+                    $tImages = AppConnection::table('images');
+                    $st = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = ?");
+                    $st->execute([$wsSlug]);
+                    $imagenesTotal = (int) $st->fetchColumn();
+                    $condMod = AppConnection::getCurrentDriver() === 'mysql'
+                ? 'moderation_analyzed_at IS NULL'
+                : '(moderation_analyzed_at IS NULL OR moderation_analyzed_at = \'\')';
+            $stMod = $pdo->prepare("SELECT COUNT(*) FROM {$tImages} WHERE workspace_slug = ? AND {$condMod}");
+                    $stMod->execute([$wsSlug]);
+                    $imagenesPendientesModeracion = (int) $stMod->fetchColumn();
+                }
+            } catch (\Throwable $e) {
+                // no romper la respuesta; los indicadores quedarán null
+            }
 
             // Limpiar cualquier output inesperado antes de enviar JSON
             ob_clean();
@@ -215,6 +261,11 @@ class ProcesarController extends BaseController
                 'estado' => $estadoProcesamiento,
                 'clasificacion_stats' => $clasificacionStats,
                 'log_items' => $logItems,
+                'indicadores' => [
+                    'registros_pendientes_descarga' => $pendientesDescarga,
+                    'imagenes_total' => $imagenesTotal,
+                    'imagenes_pendientes_moderacion' => $imagenesPendientesModeracion,
+                ],
             ]);
             
         } catch (\Exception $e) {
@@ -231,10 +282,17 @@ class ProcesarController extends BaseController
 
     /**
      * Estadísticas de descarga de tablas (registros descargados / pendientes) para el panel Procesando.
+     * Acepta workspace por GET para peticiones desde el index.
      */
     public function estadisticasDescarga()
     {
         try {
+            if (isset($_GET['workspace']) && trim((string) $_GET['workspace']) !== '') {
+                $reqWs = \App\Services\WorkspaceService::slugify(trim((string) $_GET['workspace']));
+                if ($reqWs !== '' && \App\Services\WorkspaceService::isValidSlug($reqWs) && \App\Services\WorkspaceService::exists($reqWs)) {
+                    \App\Services\WorkspaceService::setCurrent($reqWs);
+                }
+            }
             if (\App\Services\ConfigService::getWorkspaceMode() !== 'db_and_images') {
                 $this->jsonResponse([
                     'success' => true,

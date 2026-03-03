@@ -45,4 +45,28 @@ $h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES); };
       </div>
     </div>
   </div>
+  <div class="acordeon-item" data-acordeon="moderacion">
+    <div class="acordeon-header">
+      <span><i class="fas fa-shield-alt"></i> Filtrar por moderación</span>
+    </div>
+    <div class="acordeon-body">
+      <div class="acordeon-body-inner">
+        <p class="small text-muted mb-2">Haz clic en una o varias etiquetas para filtrar imágenes. Los resultados se ordenan por etiqueta y confianza.</p>
+        <div id="lstEtiquetasModeracion<?php echo $h($suffix); ?>" class="moderacion-tags-wrap mb-2"></div>
+        <small class="form-text text-muted" id="stModeracionBuscar<?php echo $h($suffix); ?>"></small>
+        <div class="grid-resultados-moderacion-wrap mt-2">
+          <div id="gridResultadosModeracion<?php echo $h($suffix); ?>" class="row grid-resultados-moderacion"></div>
+        </div>
+        <div id="paginacionModeracion<?php echo $h($suffix); ?>" class="paginacion-moderacion mt-2 d-none">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <span class="small text-muted" id="stPaginacionModeracion<?php echo $h($suffix); ?>">Página 1 de 1</span>
+            <div>
+              <button type="button" class="btn btn-sm btn-outline-secondary paginacion-prev" id="btnModeracionPrev<?php echo $h($suffix); ?>">Anterior</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary paginacion-next ml-1" id="btnModeracionNext<?php echo $h($suffix); ?>">Siguiente</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>

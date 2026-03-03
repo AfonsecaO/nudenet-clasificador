@@ -1,6 +1,7 @@
 <?php
 /** @var array $mysql */
 /** @var string $storage_engine */
+/** @var array $aws */
 
 $__title = 'Parametrización global';
 $__bodyClass = 'page-workspace-global-config';
@@ -16,6 +17,15 @@ if ($currentEngine !== 'mysql') $currentEngine = 'sqlite';
 $isWizard = !\App\Services\StorageEngineConfig::storageEngineFileExists();
 $registrosDescarga = (int) ($registros_descarga ?? \App\Services\StorageEngineConfig::getRegistrosDescarga());
 $registrosDescarga = max(1, min(1000, $registrosDescarga));
+$registrosModeracion = (int) ($registros_moderacion ?? \App\Services\StorageEngineConfig::getRegistrosModeracion());
+$registrosModeracion = max(1, min(100, $registrosModeracion));
+
+$aws = is_array($aws ?? null) ? $aws : [];
+$awsKey = (string) ($aws['key'] ?? '');
+$awsRegion = (string) ($aws['region'] ?? 'us-east-1');
+$awsVersion = (string) ($aws['version'] ?? 'latest');
+$awsMinConfidence = isset($aws['min_confidence']) ? (float) $aws['min_confidence'] : 50.0;
+$awsMinConfidence = max(0, min(100, $awsMinConfidence));
 ?>
 
 <nav class="topnav">
@@ -61,10 +71,15 @@ $registrosDescarga = max(1, min(1000, $registrosDescarga));
             </div>
             <div class="card-body">
               <p class="text-muted small mb-3">Número de registros a procesar por petición al descargar imágenes (1–1000).</p>
-              <div class="form-group mb-0">
+              <div class="form-group">
                 <label for="registros_descarga">Registros por petición</label>
                 <input type="number" class="form-control form-control-lg" id="registros_descarga" name="registros_descarga" value="<?php echo (int) $registrosDescarga; ?>" min="1" max="1000" aria-describedby="registros_descarga_help">
                 <small id="registros_descarga_help" class="form-text text-muted">Valor global para todos los workspaces.</small>
+              </div>
+              <div class="form-group mb-0">
+                <label for="registros_moderacion">Registros por lote de moderación</label>
+                <input type="number" class="form-control form-control-lg" id="registros_moderacion" name="registros_moderacion" value="<?php echo (int) $registrosModeracion; ?>" min="1" max="100" aria-describedby="registros_moderacion_help">
+                <small id="registros_moderacion_help" class="form-text text-muted">Número de imágenes a procesar por petición al ejecutar "Clasificar moderación" (1–100).</small>
               </div>
             </div>
           </div>
@@ -85,19 +100,19 @@ $registrosDescarga = max(1, min(1000, $registrosDescarga));
                     <input type="text" class="form-control" id="mysql_host" name="host" value="<?php echo htmlspecialchars($host, ENT_QUOTES); ?>" placeholder="127.0.0.1">
                   </div>
                 </div>
-                <div class="col-12 col-md-6 col-lg-2">
+                <div class="col-12 col-md-6 col-lg-4">
                   <div class="form-group">
                     <label for="mysql_port">Puerto</label>
                     <input type="number" class="form-control" id="mysql_port" name="port" value="<?php echo (int) $port; ?>" min="1" max="65535" placeholder="3306">
                   </div>
                 </div>
-                <div class="col-12 col-md-6 col-lg-3">
+                <div class="col-12 col-md-6 col-lg-4">
                   <div class="form-group">
                     <label for="mysql_user">Usuario</label>
                     <input type="text" class="form-control" id="mysql_user" name="user" value="<?php echo htmlspecialchars($user, ENT_QUOTES); ?>" placeholder="root">
                   </div>
                 </div>
-                <div class="col-12 col-md-6 col-lg-3">
+                <div class="col-12 col-md-6 col-lg-4">
                   <div class="form-group">
                     <label for="mysql_password">Contraseña</label>
                     <input type="password" class="form-control" id="mysql_password" name="password" value="" placeholder="" autocomplete="new-password">
@@ -112,6 +127,53 @@ $registrosDescarga = max(1, min(1000, $registrosDescarga));
                 </div>
               </div>
               <p class="text-muted small mb-0">Al guardar con MySQL se comprueba la conexión; solo se guarda si es correcta.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-12 mb-3">
+          <div class="card global-config-card">
+            <div class="card-header">
+              <h2 class="h6 mb-0"><i class="fas fa-robot"></i> AWS Rekognition (moderación de contenido)</h2>
+            </div>
+            <div class="card-body">
+              <p class="text-muted small mb-3">Credenciales y opciones para clasificar imágenes con Content Moderation. La confianza mínima (MinConfidence) se envía a la API; por debajo de 50% suele haber más falsos positivos.</p>
+              <div class="row">
+                <div class="col-12 col-md-6 col-lg-4">
+                  <div class="form-group">
+                    <label for="aws_region">Región</label>
+                    <input type="text" class="form-control" id="aws_region" name="aws_region" value="<?php echo htmlspecialchars($awsRegion, ENT_QUOTES); ?>" placeholder="us-east-1">
+                  </div>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                  <div class="form-group">
+                    <label for="aws_key">Access Key ID</label>
+                    <input type="text" class="form-control" id="aws_key" name="aws_key" value="<?php echo htmlspecialchars($awsKey, ENT_QUOTES); ?>" placeholder="" autocomplete="off">
+                  </div>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                  <div class="form-group">
+                    <label for="aws_secret">Secret Access Key</label>
+                    <input type="password" class="form-control" id="aws_secret" name="aws_secret" value="" placeholder="" autocomplete="new-password">
+                    <small class="form-text text-muted">En blanco = no cambiar.</small>
+                  </div>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                  <div class="form-group">
+                    <label for="aws_version">Versión SDK</label>
+                    <input type="text" class="form-control" id="aws_version" name="aws_version" value="<?php echo htmlspecialchars($awsVersion, ENT_QUOTES); ?>" placeholder="latest">
+                  </div>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                  <div class="form-group">
+                    <label for="aws_min_confidence">Confianza mínima (%)</label>
+                    <input type="number" class="form-control" id="aws_min_confidence" name="aws_min_confidence" value="<?php echo (int) round($awsMinConfidence); ?>" min="0" max="100" step="1" aria-describedby="aws_min_confidence_help">
+                    <small id="aws_min_confidence_help" class="form-text text-muted">MinConfidence (default 50).</small>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -153,6 +215,10 @@ $registrosDescarga = max(1, min(1000, $registrosDescarga));
   function getFormData() {
     const regEl = document.getElementById('registros_descarga');
     const reg = regEl ? parseInt(regEl.value, 10) : 1;
+    const regModEl = document.getElementById('registros_moderacion');
+    const regMod = regModEl ? parseInt(regModEl.value, 10) : 20;
+    const minConfEl = document.getElementById('aws_min_confidence');
+    const minConf = minConfEl ? parseFloat(minConfEl.value) : 50;
     return {
       driver: getDriver(),
       host: (document.getElementById('mysql_host') && document.getElementById('mysql_host').value) || '',
@@ -160,7 +226,15 @@ $registrosDescarga = max(1, min(1000, $registrosDescarga));
       user: (document.getElementById('mysql_user') && document.getElementById('mysql_user').value) || '',
       password: (document.getElementById('mysql_password') && document.getElementById('mysql_password').value) || '',
       database: (document.getElementById('mysql_database') && document.getElementById('mysql_database').value) || '',
-      registros_descarga: isNaN(reg) || reg < 1 ? 1 : reg > 1000 ? 1000 : reg
+      registros_descarga: isNaN(reg) || reg < 1 ? 1 : reg > 1000 ? 1000 : reg,
+      registros_moderacion: isNaN(regMod) || regMod < 1 ? 20 : regMod > 100 ? 100 : regMod,
+      aws: {
+        key: (document.getElementById('aws_key') && document.getElementById('aws_key').value) || '',
+        secret: (document.getElementById('aws_secret') && document.getElementById('aws_secret').value) || '',
+        region: (document.getElementById('aws_region') && document.getElementById('aws_region').value) || 'us-east-1',
+        version: (document.getElementById('aws_version') && document.getElementById('aws_version').value) || 'latest',
+        min_confidence: isNaN(minConf) || minConf < 0 ? 50 : minConf > 100 ? 100 : minConf
+      }
     };
   }
 
@@ -184,7 +258,7 @@ $registrosDescarga = max(1, min(1000, $registrosDescarga));
       const resp = await fetch('?action=workspace_global_config_save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ driver: d.driver, host: d.host, port: d.port, user: d.user, password: d.password, database: d.database, registros_descarga: d.registros_descarga })
+        body: JSON.stringify({ driver: d.driver, host: d.host, port: d.port, user: d.user, password: d.password, database: d.database, registros_descarga: d.registros_descarga, registros_moderacion: d.registros_moderacion, aws: d.aws })
       });
       const data = await resp.json().catch(function () { return {}; });
       if (resp.ok && data.success) {

@@ -489,7 +489,31 @@ body.page-workspace-global-config .main .container--global-config { overflow: vi
 .acciones-block:first-child {
   padding-top: 0;
 }
-
+.acciones-indicadores {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+.acciones-indicador-num {
+  display: block;
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--text);
+}
+.acciones-block-descarga-moderacion {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.acciones-block-descarga-moderacion .acciones-block-col {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+.acciones-block-descarga-moderacion .acciones-block-header {
+  margin-bottom: 0.35rem;
+}
+.acciones-block-mantenimiento {
+  padding-top: 1rem;
+}
 .acciones-block-header {
   display: flex;
   align-items: center;
@@ -1738,6 +1762,17 @@ body.page-workspace-global-config .main .container--global-config { overflow: vi
   min-height: 0;
   overflow: hidden;
 }
+.buscador-acordeon.expanded-moderacion .acordeon-item[data-acordeon="moderacion"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.buscador-acordeon.expanded-moderacion .acordeon-item[data-acordeon="carpetas"],
+.buscador-acordeon.expanded-moderacion .acordeon-item[data-acordeon="etiquetas"] {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: hidden;
+}
 /* Solo se colapsa el área de resultados; el input y los tags de cada buscador siguen visibles */
 .acordeon-header {
   display: flex;
@@ -1782,6 +1817,21 @@ body.page-workspace-global-config .main .container--global-config { overflow: vi
   min-height: 0;
   overflow: hidden;
   opacity: 1;
+}
+.buscador-acordeon.expanded-moderacion .acordeon-item[data-acordeon="moderacion"] .acordeon-body {
+  opacity: 1;
+}
+/* Contenedor con scroll para la rejilla de resultados de moderación */
+.grid-resultados-moderacion-wrap {
+  max-height: 55vh;
+  min-height: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 0.25rem;
+}
+.grid-resultados-moderacion-wrap .grid-resultados-moderacion {
+  padding-bottom: 0.5rem;
 }
 /* Efecto al colapsar: el área que pierde foco se desvanece un poco */
 .buscador-acordeon .acordeon-item .buscador-results-wrap {
@@ -2117,6 +2167,29 @@ body.page-workspace-global-config .main .container--global-config { overflow: vi
   color: var(--soft-active);
 }
 
+/* Etiquetas de moderación (buscador): chips clicables */
+.moderacion-tags-wrap .tag-chip-moderation {
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--soft-3);
+  background: var(--soft-chip-bg);
+  color: var(--soft-1);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.moderacion-tags-wrap .tag-chip-moderation:hover {
+  background: var(--soft-3-bg);
+  border-color: var(--soft-1);
+  color: var(--soft-active);
+}
+.moderacion-tags-wrap .tag-chip-moderation.tag-chip-active {
+  background: var(--soft-active-bg);
+  border-color: var(--soft-active);
+  color: var(--soft-active);
+}
+
 /* hr */
 hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
@@ -2161,10 +2234,14 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
 .page-workspaces .ws-search-consolidado-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .page-workspaces .ws-search-consolidado .buscador-acordeon.ws-search-acordeon { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-carpetas .acordeon-item[data-acordeon="carpetas"] .acordeon-body,
-.page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-etiquetas .acordeon-item[data-acordeon="etiquetas"] .acordeon-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-etiquetas .acordeon-item[data-acordeon="etiquetas"] .acordeon-body,
+.page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-moderacion .acordeon-item[data-acordeon="moderacion"] .acordeon-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .page-workspaces .ws-search-consolidado .buscador-acordeon .acordeon-item[data-acordeon="etiquetas"],
-.page-workspaces .ws-search-consolidado .buscador-acordeon .acordeon-item[data-acordeon="carpetas"] { min-height: 0; }
+.page-workspaces .ws-search-consolidado .buscador-acordeon .acordeon-item[data-acordeon="carpetas"],
+.page-workspaces .ws-search-consolidado .buscador-acordeon .acordeon-item[data-acordeon="moderacion"] { min-height: 0; }
 .page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-etiquetas .acordeon-item[data-acordeon="etiquetas"] .acordeon-body-inner { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado .buscador-acordeon.expanded-moderacion .acordeon-item[data-acordeon="moderacion"] .acordeon-body-inner { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-workspaces .ws-search-consolidado .grid-resultados-moderacion-wrap { flex: 1 1 0; min-height: 0; max-height: none; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 .page-workspaces .ws-search-consolidado .buscador-tags-wrap { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding-bottom: 0.5rem; }
 .page-workspaces .ws-search-consolidado .buscador-results-wrap { flex: 1 1 0; min-height: 0; }
 
@@ -2428,6 +2505,9 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
 .ws-stat-full {
   grid-column: span 1;
 }
+.ws-stat-col12 {
+  grid-column: 1 / -1;
+}
 .ws-stat-num {
   display: block;
   font-weight: 700;
@@ -2452,13 +2532,24 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
 /* Botones: 2 filas; si un botón queda solo en su fila, ocupa todo el ancho */
 .ws-card-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.4rem;
   padding-top: 0.5rem;
   margin-top: 0.25rem;
+}
+.ws-card-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.ws-card-actions-row--top {
+  order: 1;
+}
+.ws-card-actions-row--bottom {
+  order: 2;
   border-top: 1px solid var(--border);
 }
-.ws-card-actions .btn {
+.ws-card-actions-row .btn {
   flex: 1 1 calc(50% - 0.2rem);
   min-width: 4.5rem;
   max-width: 100%;
@@ -2488,11 +2579,13 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
   flex-shrink: 0;
   font-size: 0.8em;
 }
-.ws-card-actions .btnEnterWs { order: 1; }
-.ws-card-actions .btnSetupWs { order: 2; }
-.ws-card-actions .btnWsDescargar,
-.ws-card-actions .ws-card-actions-btn-descargar { order: 3; }
-.ws-card-actions .btnWsClasificar { order: 4; }
+.ws-card-actions-row--top .btnSetupWs { order: 1; }
+.ws-card-actions-row--top .btnEnterWs { order: 2; }
+.ws-card-actions-row--bottom .btnWsDescargar,
+.ws-card-actions-row--bottom .ws-card-actions-btn-descargar { order: 1; }
+.ws-card-actions-row--bottom .btnWsModeracion,
+.ws-card-actions-row--bottom .ws-card-actions-btn-moderacion { order: 2; }
+.ws-card-actions .btnWsClasificar { order: 2; }
 /* Entrar: único botón primario */
 .ws-card-actions .btnEnterWs.btn-primary {
   background: var(--accent);
@@ -2516,13 +2609,17 @@ body.page-workspaces .ws-grid-wrap { min-height: 0; overflow-y: auto; overflow-x
   border-color: var(--text-muted);
 }
 .ws-card-actions .btnWsDescargar,
-.ws-card-actions .ws-card-actions-btn-descargar {
+.ws-card-actions .ws-card-actions-btn-descargar,
+.ws-card-actions .btnWsModeracion,
+.ws-card-actions .ws-card-actions-btn-moderacion {
   background: transparent;
   color: var(--info);
   border-color: var(--border);
 }
 .ws-card-actions .btnWsDescargar:hover:not(:disabled),
-.ws-card-actions .ws-card-actions-btn-descargar:hover:not(:disabled) {
+.ws-card-actions .ws-card-actions-btn-descargar:hover:not(:disabled),
+.ws-card-actions .btnWsModeracion:hover:not(:disabled),
+.ws-card-actions .ws-card-actions-btn-moderacion:hover:not(:disabled) {
   background: var(--info-bg);
   border-color: var(--info);
   color: var(--info);

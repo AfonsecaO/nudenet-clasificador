@@ -94,9 +94,12 @@ class SqliteSchema
                 file_mtime INTEGER,
                 file_size INTEGER,
                 scan_run INTEGER DEFAULT 0,
+                moderation_analyzed_at TEXT,
+                moderation_model_version TEXT,
                 PRIMARY KEY (workspace_slug, relative_path)
             )
         ");
+        self::addImagesModerationColumnsIfMissing($pdo);
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_ws ON images(workspace_slug)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_ws_folder_path ON images(workspace_slug, folder_path)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_folder_path ON images(folder_path)");
@@ -107,6 +110,24 @@ class SqliteSchema
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_content_md5 ON images(content_md5)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_ws_raw_md5 ON images(workspace_slug, raw_md5)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_images_file_mtime ON images(file_mtime)");
+
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS image_moderation_labels (
+                workspace_slug TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                taxonomy_level INTEGER NOT NULL,
+                label_name TEXT NOT NULL,
+                parent_name TEXT,
+                confidence REAL,
+                created_at TEXT,
+                PRIMARY KEY (workspace_slug, relative_path, taxonomy_level, label_name)
+            )
+        ");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_iml_ws ON image_moderation_labels(workspace_slug)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_iml_ws_level ON image_moderation_labels(workspace_slug, taxonomy_level)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_iml_ws_label ON image_moderation_labels(workspace_slug, label_name)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_iml_ws_level_label ON image_moderation_labels(workspace_slug, taxonomy_level, label_name)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_iml_ws_label_conf ON image_moderation_labels(workspace_slug, label_name, confidence)");
 
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS folders (
@@ -141,5 +162,23 @@ class SqliteSchema
         $ws = $workspaceSlug ?? AppConnection::currentSlug() ?? self::DEFAULT_SLUG;
         $stmt = $pdo->prepare('INSERT INTO workspace_meta(workspace_slug, key, value) VALUES(:ws, :k, :v) ON CONFLICT(workspace_slug, key) DO UPDATE SET value=excluded.value');
         $stmt->execute([':ws' => $ws, ':k' => $key, ':v' => (string)$value]);
+    }
+
+    /**
+     * Añade columnas de moderación a images si la tabla ya existía sin ellas (migración).
+     */
+    private static function addImagesModerationColumnsIfMissing(PDO $pdo): void
+    {
+        $stmt = $pdo->query('PRAGMA table_info(images)');
+        $columns = [];
+        while (($row = $stmt->fetch(\PDO::FETCH_ASSOC)) !== false) {
+            $columns[$row['name']] = true;
+        }
+        if (!isset($columns['moderation_analyzed_at'])) {
+            $pdo->exec('ALTER TABLE images ADD COLUMN moderation_analyzed_at TEXT');
+        }
+        if (!isset($columns['moderation_model_version'])) {
+            $pdo->exec('ALTER TABLE images ADD COLUMN moderation_model_version TEXT');
+        }
     }
 }

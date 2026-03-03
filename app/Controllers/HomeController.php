@@ -65,11 +65,8 @@ class HomeController extends BaseController
                 $totalTablasEstado = count($tablasDelEstado);
             }
             
-            // Workspace por URL: para workers en paralelo (varias pestañas), enviar en cada API call
-            $appWorkspaceSlug = null;
-            if (\App\Services\WorkspaceService::hasRequestOverride()) {
-                $appWorkspaceSlug = \App\Services\WorkspaceService::current();
-            }
+            // Workspace actual (URL o cookie) para que la vista tenga APP_WORKSPACE y carguen los indicadores
+            $appWorkspaceSlug = \App\Services\WorkspaceService::current();
             $autoParam = isset($_GET['auto']) && $_GET['auto'] === 'descargar' ? 'descargar' : null;
 
             // Preparar datos para la vista
