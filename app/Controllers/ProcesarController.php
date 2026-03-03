@@ -72,13 +72,13 @@ class ProcesarController extends BaseController
             // Inicializar procesadores
             $procesador = new ProcesadorTablas();
             $materializador = new MaterializadorImagenes();
-            
+
             $columnasImagen = $procesador->getColumnasImagen();
             $campoIdentificador = $procesador->getCampoIdentificador();
             $campoUsrId = $procesador->getCampoUsrId();
             $campoFecha = $procesador->getCampoFecha();
             $campoResultado = $procesador->getCampoResultado();
-            
+
             $tablaProcesada = null;
             $registroProcesado = false;
             $totalImagenes = 0;
@@ -88,112 +88,102 @@ class ProcesarController extends BaseController
             $registroId = null;
             $clasificacionStats = null;
 
-            $limiteRegistros = \App\Services\StorageEngineConfig::getRegistrosDescarga();
-
+            $batchSize = \App\Services\StorageEngineConfig::getRegistrosDescarga();
             $procesadosEnPeticion = 0;
-            while ($procesadosEnPeticion < $limiteRegistros) {
-                $avanzado = false;
-                foreach ($tablasDelEstado as $tabla) {
-                    if (!$estadoTracker->faltanRegistros($tabla)) {
-                        continue;
-                    }
-                    $tablaProcesada = $tabla;
-                    $resultadoRegistro = $procesador->obtenerSiguienteRegistro($tabla);
+            $range = null;
 
-                    if (!$resultadoRegistro['success']) {
-                        $mensaje = "Error en tabla {$tabla}: " . $resultadoRegistro['error'];
-                        LogService::append(['type' => 'error', 'message' => $mensaje]);
-                        continue;
-                    }
-
-                    if ($resultadoRegistro['registro'] === null) {
-                        $mensaje = "No hay más registros en {$tabla}";
-                        LogService::append(['type' => 'info', 'message' => $mensaje]);
-                        continue;
-                    }
-
-                    $registro = $resultadoRegistro['registro'];
-                    $registroProcesado = true;
-                    $avanzado = true;
-
-                    try {
-                        $primaryKey = \App\Services\ConfigService::obtenerRequerido('PRIMARY_KEY');
-                        $registroId = isset($registro[$primaryKey]) ? (is_numeric($registro[$primaryKey]) ? (int)$registro[$primaryKey] : $registro[$primaryKey]) : null;
-                    } catch (\Exception $e) {
-                        $registroId = null;
-                    }
-
-                    $resultadosImagenes = $materializador->materializarImagenesRegistro(
-                        $registro,
-                        $columnasImagen,
-                        $campoIdentificador,
-                        $campoUsrId,
-                        $campoFecha,
-                        $campoResultado
-                    );
-
-                    $erroresImagenes = [];
-                    $rutasGuardadas = [];
-                    $rawMd5PorRuta = [];
-                    foreach ($resultadosImagenes as $columna => $resultadoImg) {
-                        if (!empty($resultadoImg['duplicate'])) {
-                            $totalDuplicadas++;
-                            $duplicadasCols[] = (string)$columna;
-                            continue;
-                        }
-                        if (($resultadoImg['success'] ?? false) === true) {
-                            if (!empty($resultadoImg['ruta'])) {
-                                $totalImagenes++;
-                                $rutasGuardadas[] = $resultadoImg['ruta'];
-                                if (!empty($resultadoImg['raw_md5'])) {
-                                    $rawMd5PorRuta[$resultadoImg['ruta']] = $resultadoImg['raw_md5'];
-                                }
-                            }
-                        } else {
-                            $erroresImagenes[] = $columna . ': ' . ($resultadoImg['error'] ?? 'Error desconocido');
-                        }
-                    }
-
-                    if (!empty($rutasGuardadas)) {
-                        try {
-                            $imagenesIndex = new ImagenesIndex();
-                            $directorioBase = ImagenesIndex::resolverDirectorioBaseImagenes();
-                            $imagenesIndex->upsertDesdeRutas($rutasGuardadas, $directorioBase, $rawMd5PorRuta);
-                            $clasificacionStats = $imagenesIndex->getStats(true);
-                        } catch (\Exception $e) {
-                            $clasificacionStats = null;
-                        }
-                    }
-
-                    $valorId = ($registroId !== null) ? (string) $registroId : '—';
-                    $countErrores = count($erroresImagenes);
-                    $mensaje = $tabla . ' | ID:' . $valorId . ' | M:' . $totalImagenes . ' | E:' . $countErrores;
-                    if (!$resultadoRegistro['faltan_registros']) {
-                        $mensaje .= ' (tabla completada)';
-                    }
-                    LogService::append([
-                        'type' => $totalImagenes > 0 ? 'success' : ($countErrores > 0 ? 'warning' : 'info'),
-                        'message' => $mensaje,
-                    ]);
-
-                    $estadoTracker->actualizarUltimoId(
-                        $tablaProcesada,
-                        $registroId,
-                        $resultadoRegistro['faltan_registros'] ?? true
-                    );
-
-                    $procesadosEnPeticion++;
-                    $estadoTracker->recargarEstado();
-                    if ($procesadosEnPeticion >= $limiteRegistros) {
-                        break 2;
-                    }
+            foreach ($tablasDelEstado as $tabla) {
+                if (!$estadoTracker->faltanRegistros($tabla)) {
+                    continue;
                 }
-                if (!$avanzado) {
+                $maxIdOrigen = $procesador->obtenerMaxIdDesdeOrigen($tabla);
+                if ($maxIdOrigen !== null) {
+                    $estadoTracker->actualizarMaxId($tabla, $maxIdOrigen);
+                }
+                $range = $estadoTracker->claimNextBatch($tabla, $batchSize);
+                if ($range === null) {
+                    continue;
+                }
+                $tablaProcesada = $tabla;
+                $registros = $procesador->obtenerRegistrosEnRango($tabla, $range['id_min'], $range['id_max']);
+                if (empty($registros)) {
+                    LogService::append(['type' => 'warning', 'message' => "Tabla {$tabla}: no se obtuvieron registros en rango [{$range['id_min']}, {$range['id_max']}]"]);
+                    $estadoTracker->markBatchCompleted($tabla, $range['id_min'], $range['id_max']);
+                    $estadoTracker->purgeCompletedClaims();
                     break;
                 }
+
+                try {
+                    $primaryKey = \App\Services\ConfigService::obtenerRequerido('PRIMARY_KEY');
+                    foreach ($registros as $registro) {
+                        $registroProcesado = true;
+                        $procesadosEnPeticion++;
+                        try {
+                            $registroId = isset($registro[$primaryKey]) ? (is_numeric($registro[$primaryKey]) ? (int) $registro[$primaryKey] : $registro[$primaryKey]) : null;
+                        } catch (\Exception $e) {
+                            $registroId = null;
+                        }
+
+                        $resultadosImagenes = $materializador->materializarImagenesRegistro(
+                            $registro,
+                            $columnasImagen,
+                            $campoIdentificador,
+                            $campoUsrId,
+                            $campoFecha,
+                            $campoResultado
+                        );
+
+                        $erroresImagenes = [];
+                        $rutasGuardadas = [];
+                        $rawMd5PorRuta = [];
+                        foreach ($resultadosImagenes as $columna => $resultadoImg) {
+                            if (!empty($resultadoImg['duplicate'])) {
+                                $totalDuplicadas++;
+                                $duplicadasCols[] = (string) $columna;
+                                continue;
+                            }
+                            if (($resultadoImg['success'] ?? false) === true) {
+                                if (!empty($resultadoImg['ruta'])) {
+                                    $totalImagenes++;
+                                    $rutasGuardadas[] = $resultadoImg['ruta'];
+                                    if (!empty($resultadoImg['raw_md5'])) {
+                                        $rawMd5PorRuta[$resultadoImg['ruta']] = $resultadoImg['raw_md5'];
+                                    }
+                                }
+                            } else {
+                                $erroresImagenes[] = $columna . ': ' . ($resultadoImg['error'] ?? 'Error desconocido');
+                            }
+                        }
+
+                        if (!empty($rutasGuardadas)) {
+                            try {
+                                $imagenesIndex = new ImagenesIndex();
+                                $directorioBase = ImagenesIndex::resolverDirectorioBaseImagenes();
+                                $imagenesIndex->upsertDesdeRutas($rutasGuardadas, $directorioBase, $rawMd5PorRuta);
+                                $clasificacionStats = $imagenesIndex->getStats(true);
+                            } catch (\Exception $e) {
+                                $clasificacionStats = null;
+                            }
+                        }
+
+                        $valorId = ($registroId !== null) ? (string) $registroId : '—';
+                        $countErrores = count($erroresImagenes);
+                        $mensaje = $tabla . ' | ID:' . $valorId . ' | M:' . $totalImagenes . ' | E:' . $countErrores;
+                        LogService::append([
+                            'type' => $totalImagenes > 0 ? 'success' : ($countErrores > 0 ? 'warning' : 'info'),
+                            'message' => $mensaje,
+                        ]);
+                    }
+
+                    $estadoTracker->markBatchCompleted($tablaProcesada, $range['id_min'], $range['id_max']);
+                    $estadoTracker->purgeCompletedClaims();
+                } catch (\Throwable $e) {
+                    LogService::append(['type' => 'error', 'message' => "Error procesando lote {$tablaProcesada} [{$range['id_min']}-{$range['id_max']}]: " . $e->getMessage()]);
+                    // No llamar markBatchCompleted: el claim queda in_progress y será reclaimable como stale
+                }
+                break;
             }
-            
-            // Recargar estado desde el archivo (el ProcesadorTablas ya lo actualizó y guardó)
+
             $estadoTracker->recargarEstado();
             $estadoProcesamiento = $estadoTracker->getEstado();
             $totalRegistros = 0;

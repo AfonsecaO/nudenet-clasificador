@@ -4,10 +4,15 @@ namespace App\Models;
 
 class EstadoTracker
 {
+    private const STALE_MINUTES = 10;
+    private const CLAIMS_RETENTION_HOURS = 24;
+    private const PURGE_LIMIT = 500;
+
     private $pdo;
 
     private $tTablesState;
     private $tTablesIndex;
+    private $tBatchClaims;
 
     private function ws(): string
     {
@@ -21,6 +26,7 @@ class EstadoTracker
         \App\Services\AppSchema::ensure($this->pdo);
         $this->tTablesState = \App\Services\AppConnection::table('tables_state');
         $this->tTablesIndex = \App\Services\AppConnection::table('tables_index');
+        $this->tBatchClaims = \App\Services\AppConnection::table('batch_claims');
     }
 
     /**
@@ -302,5 +308,186 @@ class EstadoTracker
         $stmt = $this->pdo->prepare('SELECT 1 FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t LIMIT 1');
         $stmt->execute([':ws' => $this->ws(), ':t' => $tabla]);
         return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Reserva atómicamente un lote para procesar: primero intenta reclamar un claim stale (in_progress antiguo),
+     * si no hay, inserta un nuevo rango. Devuelve ['id_min' => int, 'id_max' => int] o null si no hay trabajo.
+     */
+    public function claimNextBatch(string $tabla, int $batchSize): ?array
+    {
+        $this->inicializarTabla($tabla);
+        $ws = $this->ws();
+        $now = date('Y-m-d H:i:s');
+        $staleThreshold = date('Y-m-d H:i:s', strtotime('-' . self::STALE_MINUTES . ' minutes'));
+
+        $driver = \App\Services\AppConnection::getCurrentDriver();
+
+        // 1) Reclaim stale: in_progress con claimed_at antiguo
+        $stmt = $this->pdo->prepare(
+            'SELECT id_min, id_max FROM ' . $this->tBatchClaims . '
+            WHERE workspace_slug = :ws AND table_name = :t AND status = \'in_progress\' AND claimed_at < :stale
+            ORDER BY id_min ASC LIMIT 1'
+        );
+        $stmt->execute([':ws' => $ws, ':t' => $tabla, ':stale' => $staleThreshold]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row !== false) {
+            $idMin = (int) $row['id_min'];
+            $idMax = (int) $row['id_max'];
+            $upd = $this->pdo->prepare(
+                'UPDATE ' . $this->tBatchClaims . ' SET claimed_at = :now
+                WHERE workspace_slug = :ws AND table_name = :t AND id_min = :id_min'
+            );
+            $upd->execute([':now' => $now, ':ws' => $ws, ':t' => $tabla, ':id_min' => $idMin]);
+            return ['id_min' => $idMin, 'id_max' => $idMax];
+        }
+
+        // 2) Leer max_id y last_processed_id para calcular siguiente rango
+        $stmt = $this->pdo->prepare(
+            'SELECT last_processed_id, max_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t'
+        );
+        $stmt->execute([':ws' => $ws, ':t' => $tabla]);
+        $stateRow = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $lastProcessedId = $stateRow ? (int) ($stateRow['last_processed_id'] ?? 0) : 0;
+        $maxId = $stateRow ? (int) ($stateRow['max_id'] ?? 0) : 0;
+
+        $maxIdMaxFromClaims = null;
+        $stmt = $this->pdo->prepare(
+            'SELECT COALESCE(MAX(id_max), 0) as m FROM ' . $this->tBatchClaims . ' WHERE workspace_slug = :ws AND table_name = :t'
+        );
+        $stmt->execute([':ws' => $ws, ':t' => $tabla]);
+        $mm = $stmt->fetchColumn();
+        $maxIdMaxFromClaims = $mm !== false ? (int) $mm : 0;
+
+        $nextMin = max($lastProcessedId, $maxIdMaxFromClaims) + 1;
+        if ($nextMin > $maxId || $maxId === 0) {
+            return null;
+        }
+        $nextMax = min($nextMin + $batchSize - 1, $maxId);
+
+        $maxAttempts = 5;
+        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
+            try {
+                $ins = $this->pdo->prepare(
+                    'INSERT INTO ' . $this->tBatchClaims . ' (workspace_slug, table_name, id_min, id_max, status, claimed_at)
+                    VALUES (:ws, :t, :id_min, :id_max, \'in_progress\', :now)'
+                );
+                $ins->execute([
+                    ':ws' => $ws,
+                    ':t' => $tabla,
+                    ':id_min' => $nextMin,
+                    ':id_max' => $nextMax,
+                    ':now' => $now,
+                ]);
+                return ['id_min' => $nextMin, 'id_max' => $nextMax];
+            } catch (\PDOException $e) {
+                if ($driver === 'mysql' && $e->getCode() == 23000) {
+                    // Duplicate key: otro worker tomó el rango; recalcular next_min
+                    $stmt = $this->pdo->prepare(
+                        'SELECT COALESCE(MAX(id_max), 0) as m FROM ' . $this->tBatchClaims . ' WHERE workspace_slug = :ws AND table_name = :t'
+                    );
+                    $stmt->execute([':ws' => $ws, ':t' => $tabla]);
+                    $maxIdMaxFromClaims = (int) $stmt->fetchColumn();
+                    $nextMin = max($lastProcessedId, $maxIdMaxFromClaims) + 1;
+                    if ($nextMin > $maxId) {
+                        return null;
+                    }
+                    $nextMax = min($nextMin + $batchSize - 1, $maxId);
+                    continue;
+                }
+                if ($driver === 'sqlite' && strpos($e->getMessage(), 'UNIQUE') !== false) {
+                    $stmt = $this->pdo->prepare(
+                        'SELECT COALESCE(MAX(id_max), 0) as m FROM ' . $this->tBatchClaims . ' WHERE workspace_slug = :ws AND table_name = :t'
+                    );
+                    $stmt->execute([':ws' => $ws, ':t' => $tabla]);
+                    $maxIdMaxFromClaims = (int) $stmt->fetchColumn();
+                    $nextMin = max($lastProcessedId, $maxIdMaxFromClaims) + 1;
+                    if ($nextMin > $maxId) {
+                        return null;
+                    }
+                    $nextMax = min($nextMin + $batchSize - 1, $maxId);
+                    continue;
+                }
+                throw $e;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Marca un lote como completado y sincroniza table_states (last_processed_id, has_pending).
+     */
+    public function markBatchCompleted(string $tabla, int $idMin, int $idMax): void
+    {
+        $ws = $this->ws();
+        $now = date('Y-m-d H:i:s');
+
+        $upd = $this->pdo->prepare(
+            'UPDATE ' . $this->tBatchClaims . ' SET status = \'completed\', completed_at = :now
+            WHERE workspace_slug = :ws AND table_name = :t AND id_min = :id_min AND id_max = :id_max'
+        );
+        $upd->execute([':now' => $now, ':ws' => $ws, ':t' => $tabla, ':id_min' => $idMin, ':id_max' => $idMax]);
+
+        $stmt = $this->pdo->prepare('SELECT max_id FROM ' . $this->tTablesState . ' WHERE workspace_slug = :ws AND table_name = :t');
+        $stmt->execute([':ws' => $ws, ':t' => $tabla]);
+        $maxId = $stmt->fetchColumn();
+        $maxId = ($maxId !== false) ? (int) $maxId : 0;
+        $hasPending = $maxId > $idMax ? 1 : 0;
+
+        $updState = $this->pdo->prepare(
+            'UPDATE ' . $this->tTablesState . ' SET last_processed_id = :u, has_pending = :f, last_updated_at = :ua
+            WHERE workspace_slug = :ws AND table_name = :t'
+        );
+        $updState->execute([
+            ':u' => $idMax,
+            ':f' => $hasPending,
+            ':ua' => $now,
+            ':ws' => $ws,
+            ':t' => $tabla,
+        ]);
+    }
+
+    /**
+     * Purga claims completados o fallidos con antigüedad mayor a retention (horas). Mantiene la tabla transaccional.
+     * @return int Número de filas eliminadas
+     */
+    public function purgeCompletedClaims(int $retentionHours = self::CLAIMS_RETENTION_HOURS, int $limit = self::PURGE_LIMIT): int
+    {
+        $threshold = date('Y-m-d H:i:s', strtotime('-' . $retentionHours . ' hours'));
+        $driver = \App\Services\AppConnection::getCurrentDriver();
+        $ws = $this->ws();
+
+        if ($driver === 'mysql') {
+            $del = $this->pdo->prepare(
+                'DELETE FROM ' . $this->tBatchClaims . '
+                WHERE workspace_slug = :ws AND status IN (\'completed\', \'failed\')
+                AND (completed_at IS NOT NULL AND completed_at < :threshold)
+                ORDER BY completed_at ASC LIMIT ' . (int) $limit
+            );
+            $del->execute([':ws' => $ws, ':threshold' => $threshold]);
+            return $del->rowCount();
+        }
+
+        $sel = $this->pdo->prepare(
+            'SELECT workspace_slug, table_name, id_min FROM ' . $this->tBatchClaims . '
+            WHERE workspace_slug = :ws AND status IN (\'completed\', \'failed\')
+            AND completed_at IS NOT NULL AND completed_at < :threshold
+            ORDER BY completed_at ASC LIMIT ' . (int) $limit
+        );
+        $sel->execute([':ws' => $ws, ':threshold' => $threshold]);
+        $rows = $sel->fetchAll(\PDO::FETCH_ASSOC);
+        if (empty($rows)) {
+            return 0;
+        }
+        $deleted = 0;
+        $del = $this->pdo->prepare(
+            'DELETE FROM ' . $this->tBatchClaims . '
+            WHERE workspace_slug = :ws AND table_name = :t AND id_min = :id_min'
+        );
+        foreach ($rows as $r) {
+            $del->execute([':ws' => $r['workspace_slug'], ':t' => $r['table_name'], ':id_min' => $r['id_min']]);
+            $deleted += $del->rowCount();
+        }
+        return $deleted;
     }
 }

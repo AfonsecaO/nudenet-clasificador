@@ -94,6 +94,23 @@ class MysqlSchema
         self::createIndexIfNotExists($pdo, $tableIndexes, 'idx_table_indexes_ws', 'workspace_slug', false);
         self::createIndexIfNotExists($pdo, $tableIndexes, 'idx_table_indexes_table_name', 'table_name(191)', false);
 
+        $batchClaims = self::quoteId('batch_claims');
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS {$batchClaims} (
+                workspace_slug VARCHAR(191) NOT NULL,
+                table_name VARCHAR(255) NOT NULL,
+                id_min INT NOT NULL,
+                id_max INT NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'in_progress',
+                claimed_at DATETIME NOT NULL,
+                completed_at DATETIME NULL,
+                error_message TEXT NULL,
+                PRIMARY KEY (workspace_slug, table_name, id_min)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        self::createIndexIfNotExists($pdo, $batchClaims, 'idx_batch_claims_ws_table', 'workspace_slug, table_name(191)', false);
+        self::createIndexIfNotExists($pdo, $batchClaims, 'idx_batch_claims_status_claimed', 'workspace_slug, table_name(191), status, claimed_at', false);
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS {$imagesTable} (
                 workspace_slug VARCHAR(191) NOT NULL,

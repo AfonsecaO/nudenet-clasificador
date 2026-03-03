@@ -137,10 +137,34 @@ class ProcesadorTablas
     }
 
     /**
+     * Obtiene todos los registros de una tabla en el rango [minId, maxId] (inclusive) ordenados por primary key.
+     * @return array Lista de filas asociativas; vacío en error o si la tabla no existe.
+     */
+    public function obtenerRegistrosEnRango(string $tabla, int $minId, int $maxId): array
+    {
+        if (!$this->database->tablaExiste($tabla)) {
+            return [];
+        }
+        try {
+            $columnasStr = implode(', ', array_map(function ($col) {
+                return "`{$col}`";
+            }, $this->columnas));
+            $conn = $this->database->getConnection();
+            $sql = "SELECT {$columnasStr} FROM `{$tabla}` WHERE `{$this->primaryKey}` >= :min_id AND `{$this->primaryKey}` <= :max_id ORDER BY `{$this->primaryKey}` ASC";
+            $stmt = $conn->prepare($sql);
+            $stmt->execute([':min_id' => $minId, ':max_id' => $maxId]);
+            $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            return is_array($rows) ? $rows : [];
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+
+    /**
      * Consulta el MAX(id) actual en la BD origen para una tabla.
      * Devuelve null si no se puede obtener (tabla no existe o error).
      */
-    private function obtenerMaxIdDesdeOrigen(string $tabla): ?int
+    public function obtenerMaxIdDesdeOrigen(string $tabla): ?int
     {
         if (!$this->database->tablaExiste($tabla)) {
             return null;

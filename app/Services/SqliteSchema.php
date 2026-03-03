@@ -64,6 +64,22 @@ class SqliteSchema
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_table_indexes_table_name ON table_indexes(table_name)");
 
         $pdo->exec("
+            CREATE TABLE IF NOT EXISTS batch_claims (
+                workspace_slug TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                id_min INTEGER NOT NULL,
+                id_max INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'in_progress',
+                claimed_at TEXT NOT NULL,
+                completed_at TEXT,
+                error_message TEXT,
+                PRIMARY KEY (workspace_slug, table_name, id_min)
+            )
+        ");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_batch_claims_ws_table ON batch_claims(workspace_slug, table_name)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_batch_claims_status_claimed ON batch_claims(workspace_slug, table_name, status, claimed_at)");
+
+        $pdo->exec("
             CREATE TABLE IF NOT EXISTS images (
                 workspace_slug TEXT NOT NULL,
                 relative_path TEXT NOT NULL,
