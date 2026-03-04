@@ -2575,7 +2575,7 @@ body.ws-search-drawer-open .ws-search-fab { visibility: hidden; pointer-events: 
 .ws-stat {
   text-align: center;
   padding: 0.7rem 0.5rem;
-  background: var(--bg-page);
+  background: var(--bg-surface);
   border-radius: 8px;
   border: 1px solid var(--border);
   min-width: 0;
