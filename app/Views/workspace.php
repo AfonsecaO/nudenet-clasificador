@@ -46,8 +46,8 @@ function fmtTs($ts): string {
         </button>
       </div>
     <?php else: ?>
-    <div class="row ws-layout ws-layout--buscador-collapsed">
-      <div class="col-lg-8 col-md-12 ws-grid-wrap">
+    <div class="row ws-layout">
+      <div class="col-12 ws-grid-wrap">
     <div class="ws-grid">
       <?php foreach ($workspaces as $ws): ?>
         <?php
@@ -126,15 +126,23 @@ function fmtTs($ts): string {
     </div>
     <div class="ws-grid-spacer" aria-hidden="true"></div>
       </div>
-      <div class="col-lg-4 col-md-12 ws-search-col ws-search-col--collapsed mb-3 mb-lg-0" id="wsSearchCol">
-        <div class="ws-search-consolidado" id="wsSearchConsolidado">
-          <div class="ws-search-consolidado-header">
-            <button type="button" class="ws-search-toggle btn btn-sm btn-outline-secondary" id="wsSearchToggle" aria-expanded="false" aria-label="Expandir buscador" title="Expandir buscador">
-              <i class="fas fa-chevron-right" aria-hidden="true"></i>
-            </button>
-            <h2 class="ws-search-consolidado-title"><i class="fas fa-search"></i> Buscar en todos los workspaces</h2>
-          </div>
-          <div class="ws-search-consolidado-body">
+    </div>
+
+    <!-- Botón flotante que abre el buscador -->
+    <button type="button" class="ws-search-fab btn btn-primary" id="wsSearchOpen" title="Buscar en todos los workspaces" aria-label="Abrir buscador global">
+      <i class="fas fa-search" aria-hidden="true"></i>
+    </button>
+    <!-- Drawer flotante: buscador global (no recorre el layout) -->
+    <div class="ws-search-drawer-backdrop" id="wsSearchDrawerBackdrop" aria-hidden="true"></div>
+    <aside class="ws-search-drawer" id="wsSearchDrawer" aria-label="Buscador en todos los workspaces">
+      <div class="ws-search-drawer-inner" id="wsSearchConsolidado">
+        <div class="ws-search-consolidado-header">
+          <h2 class="ws-search-consolidado-title"><i class="fas fa-search"></i> Buscar en todos los workspaces</h2>
+          <button type="button" class="ws-search-drawer-close btn btn-sm btn-outline-secondary" id="wsSearchDrawerClose" aria-label="Cerrar buscador" title="Cerrar">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="ws-search-consolidado-body">
           <?php
           $buscador = [
             'suffix' => 'Global',
@@ -146,10 +154,9 @@ function fmtTs($ts): string {
           ];
           include __DIR__ . '/partials/buscador-acordeon.php';
           ?>
-          </div>
         </div>
       </div>
-    </div>
+    </aside>
     <?php endif; ?>
   </div>
 </main>
@@ -461,9 +468,8 @@ function fmtTs($ts): string {
       return `Imágenes: ${Number(n).toLocaleString()}`;
     }
     if (type === 'moderacion') {
-      const p = extra?.procesadas ?? 0;
       const pend = extra?.pendientes ?? 0;
-      return `${Number(p).toLocaleString()} ok, ${Number(pend).toLocaleString()} pend.`;
+      return `${Number(pend).toLocaleString()} pend.`;
     }
     return '—';
   }
@@ -815,31 +821,52 @@ function fmtTs($ts): string {
         return;
       }
       lstEtiquetasModeracionGlobal.innerHTML = '';
+      const byLevel = {};
       for (let i = 0; i < etiquetasArray.length; i++) {
         const et = etiquetasArray[i];
         const name = String(et.label_name || '').trim();
         if (!name) continue;
         const level = Number(et.taxonomy_level);
-        const count = Number(et.count) || 0;
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'btn btn-sm mr-1 mb-1 tag-chip-moderation' + (selectedModTagsGlobal.has(name) ? ' tag-chip-active' : '');
-        chip.textContent = 'Nivel ' + level + ': ' + name + ' (' + count + ')';
-        chip.dataset.labelName = name;
-        chip.addEventListener('click', async function () {
-          if (selectedModTagsGlobal.has(name)) selectedModTagsGlobal.delete(name);
-          else selectedModTagsGlobal.add(name);
-          chip.classList.toggle('tag-chip-active', selectedModTagsGlobal.has(name));
-          if (selectedModTagsGlobal.size === 0) {
-            if (stModeracionBuscarGlobal) stModeracionBuscarGlobal.textContent = 'Selecciona una o más etiquetas para filtrar.';
-            if (gridResultadosModeracionGlobal) gridResultadosModeracionGlobal.innerHTML = '';
-            if (paginacionModeracionGlobal) paginacionModeracionGlobal.classList.add('d-none');
-            return;
-          }
-          modCurrentPageGlobal = 1;
-          runBuscarModeracionGlobal(1);
-        });
-        lstEtiquetasModeracionGlobal.appendChild(chip);
+        if (!byLevel[level]) byLevel[level] = [];
+        byLevel[level].push({ name, count: Number(et.count) || 0 });
+      }
+      const levels = Object.keys(byLevel).map(Number).sort((a, b) => a - b);
+      for (let l = 0; l < levels.length; l++) {
+        const level = levels[l];
+        const items = byLevel[level];
+        const section = document.createElement('div');
+        section.className = 'moderacion-tags-section';
+        const title = document.createElement('div');
+        title.className = 'moderacion-tags-section-title';
+        title.textContent = 'Nivel ' + level;
+        section.appendChild(title);
+        const wrap = document.createElement('div');
+        wrap.className = 'moderacion-tags-section-chips';
+        for (let i = 0; i < items.length; i++) {
+          const name = items[i].name;
+          const count = items[i].count;
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'btn btn-sm mr-1 mb-1 tag-chip-moderation' + (selectedModTagsGlobal.has(name) ? ' tag-chip-active' : '');
+          chip.textContent = name + ' (' + count + ')';
+          chip.dataset.labelName = name;
+          chip.addEventListener('click', async function () {
+            if (selectedModTagsGlobal.has(name)) selectedModTagsGlobal.delete(name);
+            else selectedModTagsGlobal.add(name);
+            chip.classList.toggle('tag-chip-active', selectedModTagsGlobal.has(name));
+            if (selectedModTagsGlobal.size === 0) {
+              if (stModeracionBuscarGlobal) stModeracionBuscarGlobal.textContent = 'Selecciona una o más etiquetas para filtrar.';
+              if (gridResultadosModeracionGlobal) gridResultadosModeracionGlobal.innerHTML = '';
+              if (paginacionModeracionGlobal) paginacionModeracionGlobal.classList.add('d-none');
+              return;
+            }
+            modCurrentPageGlobal = 1;
+            runBuscarModeracionGlobal(1);
+          });
+          wrap.appendChild(chip);
+        }
+        section.appendChild(wrap);
+        lstEtiquetasModeracionGlobal.appendChild(section);
       }
     }
 
@@ -1209,32 +1236,25 @@ function fmtTs($ts): string {
 
   }
 
-  // Toggle colapso del buscador (derecha)
-  const STORAGE_KEY_BUSCADOR = 'photoClassifier.buscadorCollapsed';
-  const wsSearchCol = document.getElementById('wsSearchCol');
-  const wsSearchToggle = document.getElementById('wsSearchToggle');
-  const wsLayout = document.querySelector('.ws-layout');
-  if (wsSearchCol && wsSearchToggle) {
-    function setBuscadorCollapsed(collapsed) {
-      const isCollapsed = !!collapsed;
-      wsSearchCol.classList.toggle('ws-search-col--collapsed', isCollapsed);
-      if (wsLayout) wsLayout.classList.toggle('ws-layout--buscador-collapsed', isCollapsed);
-      wsSearchToggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
-      wsSearchToggle.setAttribute('aria-label', isCollapsed ? 'Expandir buscador' : 'Colapsar buscador');
-      wsSearchToggle.setAttribute('title', isCollapsed ? 'Expandir buscador' : 'Colapsar buscador');
-      try { localStorage.setItem(STORAGE_KEY_BUSCADOR, isCollapsed ? '1' : '0'); } catch (e) {}
+  // Drawer flotante del buscador global
+  const wsSearchDrawer = document.getElementById('wsSearchDrawer');
+  const wsSearchDrawerBackdrop = document.getElementById('wsSearchDrawerBackdrop');
+  const wsSearchOpen = document.getElementById('wsSearchOpen');
+  const wsSearchDrawerClose = document.getElementById('wsSearchDrawerClose');
+  function setSearchDrawerOpen(open) {
+    const isOpen = !!open;
+    if (wsSearchDrawer) {
+      wsSearchDrawer.classList.toggle('ws-search-drawer--open', isOpen);
+      wsSearchDrawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
     }
-    wsSearchToggle.addEventListener('click', function () {
-      setBuscadorCollapsed(wsSearchCol.classList.contains('ws-search-col--collapsed') ? false : true);
-    });
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_BUSCADOR);
-      // Por defecto colapsado; solo expandir si el usuario lo dejó abierto (saved === '0')
-      if (saved === '0') setBuscadorCollapsed(false);
-      else setBuscadorCollapsed(true);
-    } catch (e) {
-      setBuscadorCollapsed(true);
+    if (wsSearchDrawerBackdrop) {
+      wsSearchDrawerBackdrop.classList.toggle('ws-search-drawer-backdrop--visible', isOpen);
+      wsSearchDrawerBackdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
     }
+    document.body.classList.toggle('ws-search-drawer-open', isOpen);
   }
+  if (wsSearchOpen) wsSearchOpen.addEventListener('click', function () { setSearchDrawerOpen(true); });
+  if (wsSearchDrawerClose) wsSearchDrawerClose.addEventListener('click', function () { setSearchDrawerOpen(false); });
+  if (wsSearchDrawerBackdrop) wsSearchDrawerBackdrop.addEventListener('click', function () { setSearchDrawerOpen(false); });
 </script>
 

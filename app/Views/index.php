@@ -78,16 +78,16 @@ function pct($n, $d): int {
               <div class="col-6 acciones-block-col">
                 <div class="acciones-block-actions">
                   <button class="btn btn-outline-info btn-sm btn-block" id="btnDescargarRegistros" type="button" title="Descargar tablas del workspace">
-                    <i class="fas fa-download"></i> <span class="btn-accion-text">Descargar registros</span>
+                    <i class="fas fa-download"></i> <span class="btn-accion-text">Descargar</span>
                   </button>
                 </div>
                 <small class="form-text text-muted" id="stTablas"></small>
               </div>
               <?php endif; ?>
-              <div class="col-6 acciones-block-col">
+              <div class="col-<?php echo $isDbMode ? '6' : '12'; ?> acciones-block-col">
                 <div class="acciones-block-actions">
                   <button class="btn btn-outline-info btn-sm btn-block" id="btnClasificarModeracion" type="button" title="Clasificar imágenes pendientes con AWS Rekognition Content Moderation">
-                    <i class="fas fa-shield-alt"></i> <span class="btn-accion-text">Clasificar moderación</span>
+                    <i class="fas fa-shield-alt"></i> <span class="btn-accion-text">Moderación</span>
                   </button>
                 </div>
                 <small class="form-text text-muted" id="stModeracion"></small>
@@ -98,7 +98,7 @@ function pct($n, $d): int {
                 <span class="acciones-block-title"><i class="fas fa-tools"></i> Mantenimiento</span>
               </div>
               <div class="acciones-block-actions">
-                <button class="btn btn-outline-info btn-sm" id="btnReindex" type="button">
+                <button class="btn btn-outline-info btn-sm btn-block" id="btnReindex" type="button">
                   <i class="fas fa-broom"></i> Reindexar
                 </button>
               </div>
@@ -332,7 +332,7 @@ function pct($n, $d): int {
     const btn = typeof btnOrId === 'string' ? document.getElementById(btnOrId) : btnOrId;
     if (!btn) return;
     btn.classList.remove('ws-btn-processing');
-    const labels = { descargar: 'Descargar registros', moderacion: 'Clasificar moderación' };
+    const labels = { descargar: 'Descargar', moderacion: 'Moderación' };
     const icons = { descargar: 'fa-download', moderacion: 'fa-shield-alt' };
     btn.innerHTML = '<i class="fas ' + icons[type] + '"></i> <span class="btn-accion-text">' + labels[type] + '</span>';
   }
@@ -365,10 +365,10 @@ function pct($n, $d): int {
               const elMod = document.getElementById('accionIndPorModerar');
               if (elMod) elMod.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
             }
-            const stTablasEl = document.getElementById('stTablas');
             const imgText = 'Imágenes: ' + Number(ind.imagenes_total ?? 0).toLocaleString();
-            if (stTablasEl) setStatus(stTablasEl, 'neutral', imgText);
-            setIndexButtonProcessing('btnDescargarRegistros', imgText);
+            const stTablasEl = document.getElementById('stTablas');
+            if (stTablasEl) stTablasEl.textContent = '';
+            if (autoTablasRunning) setIndexButtonProcessing('btnDescargarRegistros', imgText);
           } else if (typeof msg.data?.pendientes === 'number') {
             const elReg = document.getElementById('accionIndRegistrosDescarga');
             if (elReg) elReg.textContent = Number(msg.data.pendientes).toLocaleString();
@@ -382,7 +382,7 @@ function pct($n, $d): int {
           autoTablasRunning = false;
           setIndexButtonIdle('btnDescargarRegistros', 'descargar');
           stopIndexAutoStatsPolling();
-          setStatus(stTablas, 'neutral', 'Detenido');
+          if (stTablas) stTablas.textContent = '';
           appendLog('info', 'Descarga detenida.');
           refreshAccionesIndicadores();
           refreshStats().then(() => { if (msg.data?.log_items) renderLogFromItems(msg.data.log_items); else refreshLogPanel(); });
@@ -407,17 +407,17 @@ function pct($n, $d): int {
               const elMod = document.getElementById('accionIndPorModerar');
               if (elMod) elMod.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
             }
-            const modText = Number(data.procesadas ?? 0).toLocaleString() + ' ok, ' + Number(data.pendientes ?? ind.imagenes_pendientes_moderacion ?? 0).toLocaleString() + ' pend.';
+            const modText = Number(data.pendientes ?? ind.imagenes_pendientes_moderacion ?? 0).toLocaleString() + ' pendientes.';
             const stModEl = document.getElementById('stModeracion');
-            if (stModEl) setStatus(stModEl, 'neutral', modText);
-            setIndexButtonProcessing('btnClasificarModeracion', modText);
+            if (stModEl) stModEl.textContent = '';
+            if (clasificarModeracionRunning) setIndexButtonProcessing('btnClasificarModeracion', modText);
           } else if (typeof msg.data?.pendientes === 'number') {
             const elMod = document.getElementById('accionIndPorModerar');
             if (elMod) elMod.textContent = Number(msg.data.pendientes).toLocaleString();
-            const modTextAlt = '0 ok, ' + Number(msg.data.pendientes).toLocaleString() + ' pend.';
+            const modTextAlt = Number(msg.data.pendientes).toLocaleString() + ' pendientes.';
             const stModEl = document.getElementById('stModeracion');
-            if (stModEl) setStatus(stModEl, 'neutral', modTextAlt);
-            setIndexButtonProcessing('btnClasificarModeracion', modTextAlt);
+            if (stModEl) stModEl.textContent = '';
+            if (clasificarModeracionRunning) setIndexButtonProcessing('btnClasificarModeracion', modTextAlt);
             if (Date.now() - lastRefreshAccionesAt > REFRESH_ACCIONES_THROTTLE_MS) {
               lastRefreshAccionesAt = Date.now();
               refreshAccionesIndicadores();
@@ -428,7 +428,7 @@ function pct($n, $d): int {
           clasificarModeracionRunning = false;
           setIndexButtonIdle('btnClasificarModeracion', 'moderacion');
           const stMod = document.getElementById('stModeracion');
-          if (stMod) stMod.textContent = 'Finalizado.';
+          if (stMod) stMod.textContent = '';
           appendLog('info', 'Clasificación de moderación finalizada.');
           refreshAccionesIndicadores();
           refreshLogPanel();
@@ -1215,22 +1215,19 @@ function pct($n, $d): int {
   if (btnClasificarModeracion) {
     btnClasificarModeracion.addEventListener('click', function () {
       if (!window.APP_WORKSPACE || !indexWorker) {
-        if (stModeracion) {
-          if (!window.APP_WORKSPACE) stModeracion.textContent = 'Entra desde una card de workspace (botón Entrar) para usar moderación.';
-          else stModeracion.textContent = 'El worker de procesamiento no está disponible.';
-        }
+        if (stModeracion) stModeracion.textContent = '';
         return;
       }
       if (clasificarModeracionRunning) {
         clasificarModeracionRunning = false;
         setIndexButtonIdle(btnClasificarModeracion, 'moderacion');
-        if (stModeracion) stModeracion.textContent = 'Detenido.';
+        if (stModeracion) stModeracion.textContent = '';
         indexWorker.postMessage({ type: 'remove', mode: 'classify', ws: window.APP_WORKSPACE });
         return;
       }
       clasificarModeracionRunning = true;
       setIndexButtonProcessing(btnClasificarModeracion, 'Clasificando…');
-      if (stModeracion) stModeracion.textContent = 'Clasificando…';
+      if (stModeracion) stModeracion.textContent = '';
       indexWorker.postMessage({ type: 'add', mode: 'classify', ws: window.APP_WORKSPACE });
     });
   }
@@ -1414,32 +1411,52 @@ function pct($n, $d): int {
       return;
     }
     lstEtiquetasModeracion.innerHTML = '';
-    const etiquetas = etiquetasArray;
-    for (let i = 0; i < etiquetas.length; i++) {
-      const et = etiquetas[i];
+    const byLevel = {};
+    for (let i = 0; i < etiquetasArray.length; i++) {
+      const et = etiquetasArray[i];
       const name = String(et.label_name || '').trim();
       if (!name) continue;
       const level = Number(et.taxonomy_level);
-      const count = Number(et.count) || 0;
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'btn btn-sm mr-1 mb-1 tag-chip-moderation' + (selectedModTags.has(name) ? ' tag-chip-active' : '');
-      chip.textContent = 'Nivel ' + level + ': ' + name + ' (' + count + ')';
-      chip.dataset.labelName = name;
-      chip.addEventListener('click', async () => {
-        if (selectedModTags.has(name)) selectedModTags.delete(name);
-        else selectedModTags.add(name);
-        chip.classList.toggle('tag-chip-active', selectedModTags.has(name));
-        if (selectedModTags.size === 0) {
-          if (stModeracionBuscar) stModeracionBuscar.textContent = 'Selecciona una o más etiquetas para filtrar.';
-          if (gridResultadosModeracion) gridResultadosModeracion.innerHTML = '';
-          if (paginacionModeracion) paginacionModeracion.classList.add('d-none');
-          return;
-        }
-        modCurrentPage = 1;
-        runBuscarModeracion(1);
-      });
-      lstEtiquetasModeracion.appendChild(chip);
+      if (!byLevel[level]) byLevel[level] = [];
+      byLevel[level].push({ name, count: Number(et.count) || 0 });
+    }
+    const levels = Object.keys(byLevel).map(Number).sort((a, b) => a - b);
+    for (let l = 0; l < levels.length; l++) {
+      const level = levels[l];
+      const items = byLevel[level];
+      const section = document.createElement('div');
+      section.className = 'moderacion-tags-section';
+      const title = document.createElement('div');
+      title.className = 'moderacion-tags-section-title';
+      title.textContent = 'Nivel ' + level;
+      section.appendChild(title);
+      const wrap = document.createElement('div');
+      wrap.className = 'moderacion-tags-section-chips';
+      for (let i = 0; i < items.length; i++) {
+        const name = items[i].name;
+        const count = items[i].count;
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'btn btn-sm mr-1 mb-1 tag-chip-moderation' + (selectedModTags.has(name) ? ' tag-chip-active' : '');
+        chip.textContent = name + ' (' + count + ')';
+        chip.dataset.labelName = name;
+        chip.addEventListener('click', async () => {
+          if (selectedModTags.has(name)) selectedModTags.delete(name);
+          else selectedModTags.add(name);
+          chip.classList.toggle('tag-chip-active', selectedModTags.has(name));
+          if (selectedModTags.size === 0) {
+            if (stModeracionBuscar) stModeracionBuscar.textContent = 'Selecciona una o más etiquetas para filtrar.';
+            if (gridResultadosModeracion) gridResultadosModeracion.innerHTML = '';
+            if (paginacionModeracion) paginacionModeracion.classList.add('d-none');
+            return;
+          }
+          modCurrentPage = 1;
+          runBuscarModeracion(1);
+        });
+        wrap.appendChild(chip);
+      }
+      section.appendChild(wrap);
+      lstEtiquetasModeracion.appendChild(section);
     }
     if (lstEtiquetasModeracion.children.length === 0) {
       lstEtiquetasModeracion.innerHTML = '<span class="text-muted small">Sin etiquetas. Clasifica primero.</span>';
@@ -1552,17 +1569,17 @@ function pct($n, $d): int {
 
   async function procesarTablaUna() {
     marcarPrimeraTablaProcesando();
-    if (stTablas) setStatus(stTablas, 'neutral', 'Procesando…');
+    if (stTablas) stTablas.textContent = '';
     const { ok, data } = await getJson('?action=procesar');
     if (data?.log_items) renderLogFromItems(data.log_items);
     else { await refreshLogPanel(); }
     if (!ok || !data?.success) {
-      if (stTablas) setStatus(stTablas, 'bad', String(data?.error || 'Error'));
+      if (stTablas) stTablas.textContent = '';
       if (data?.estado) renderTablasEstado(data.estado);
       return;
     }
     const msg = String(data?.mensaje || 'OK');
-    if (stTablas) setStatus(stTablas, 'ok', msg);
+    if (stTablas) stTablas.textContent = '';
     if (data?.estado) renderTablasEstado(data.estado);
     if (autoTablasRunning && data?.success && !data?.registro_procesado && !data?.faltan_registros) {
       setAutoTablas(false);
@@ -1589,14 +1606,14 @@ function pct($n, $d): int {
       setBtnDescargarLabel(false);
       if (indexWorker && window.APP_WORKSPACE) indexWorker.postMessage({ type: 'remove', mode: 'download', ws: window.APP_WORKSPACE });
       stopIndexAutoStatsPolling();
-      setStatus(stTablas, 'neutral', 'Detenido');
+      if (stTablas) stTablas.textContent = '';
       await appendLog('info', 'Descarga detenida.');
       await refreshLogPanel();
       return;
     }
     autoTablasRunning = true;
     setBtnDescargarLabel(true);
-    setStatus(stTablas, 'neutral', 'Ejecutando…');
+    if (stTablas) stTablas.textContent = '';
     await appendLog('info', 'Descarga iniciada.');
     await refreshLogPanel();
     if (indexWorker && window.APP_WORKSPACE) {
@@ -1610,7 +1627,7 @@ function pct($n, $d): int {
   if (btnDescargarRegistros) {
     btnDescargarRegistros.addEventListener('click', function () {
       if (!window.APP_WORKSPACE) {
-        if (stTablas) stTablas.textContent = 'Entra desde una card de workspace (botón Entrar) para descargar.';
+        if (stTablas) stTablas.textContent = '';
         return;
       }
       setAutoTablas(!autoTablasRunning);
