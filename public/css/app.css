@@ -2167,51 +2167,66 @@ body.page-workspace-global-config .main .container--global-config { overflow: vi
   color: var(--soft-active);
 }
 
-/* Etiquetas de moderación (buscador): secciones por nivel */
-.moderacion-tags-wrap .moderacion-tags-section {
-  margin-bottom: 1rem;
+/* Etiquetas de moderación (buscador): minimalista, UX refinada */
+.moderacion-tags-intro {
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.45;
 }
-.moderacion-tags-wrap .moderacion-tags-section:last-child {
+.moderacion-tags-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.moderacion-tags-wrap .moderacion-tags-section {
   margin-bottom: 0;
 }
 .moderacion-tags-wrap .moderacion-tags-section-title {
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--soft-2);
-  margin-bottom: 0.4rem;
-  padding-left: 0.15rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  padding-left: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  width: fit-content;
+}
+.moderacion-tags-wrap .moderacion-tags-section-title::before {
+  display: none;
 }
 .moderacion-tags-wrap .moderacion-tags-section-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
 }
 .moderacion-tags-wrap .moderacion-tags-section-chips .tag-chip-moderation {
   margin-right: 0;
   margin-bottom: 0;
 }
-/* Etiquetas de moderación (buscador): chips clicables */
+/* Chips: sin borde por defecto, estilo pill suave */
 .moderacion-tags-wrap .tag-chip-moderation {
-  font-size: 0.8125rem;
-  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.7rem;
   border-radius: 999px;
-  border: 1px solid var(--soft-3);
-  background: var(--soft-chip-bg);
-  color: var(--soft-1);
-  font-weight: 500;
+  border: none;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text);
+  font-weight: 450;
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  transition: background 0.18s ease, color 0.18s ease;
 }
 .moderacion-tags-wrap .tag-chip-moderation:hover {
-  background: var(--soft-3-bg);
-  border-color: var(--soft-1);
-  color: var(--soft-active);
+  background: rgba(0, 0, 0, 0.09);
+  color: var(--text);
 }
 .moderacion-tags-wrap .tag-chip-moderation.tag-chip-active {
   background: var(--soft-active-bg);
-  border-color: var(--soft-active);
   color: var(--soft-active);
 }
 

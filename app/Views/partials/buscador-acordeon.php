@@ -51,7 +51,7 @@ $h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES); };
     </div>
     <div class="acordeon-body">
       <div class="acordeon-body-inner">
-        <p class="small text-muted mb-2">Haz clic en una o varias etiquetas para filtrar imágenes. Los resultados se ordenan por etiqueta y confianza.</p>
+        <p class="moderacion-tags-intro small text-muted mb-3">Clic en una o más etiquetas para filtrar. Agrupadas por nivel.</p>
         <div id="lstEtiquetasModeracion<?php echo $h($suffix); ?>" class="moderacion-tags-wrap mb-2"></div>
         <small class="form-text text-muted" id="stModeracionBuscar<?php echo $h($suffix); ?>"></small>
         <div class="grid-resultados-moderacion-wrap mt-2">
