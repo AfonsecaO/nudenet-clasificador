@@ -77,8 +77,8 @@ function pct($n, $d): int {
               <?php if ($isDbMode): ?>
               <div class="col-6 acciones-block-col">
                 <div class="acciones-block-actions">
-                  <button class="btn btn-accion-mant btn-accion-mant-secondary btn-block" id="btnDescargarRegistros" type="button" title="Descargar tablas del workspace">
-                    <i class="fas fa-download btn-icon"></i> <span class="btn-accion-text">Descargar registros</span>
+                  <button class="btn btn-outline-info btn-sm btn-block" id="btnDescargarRegistros" type="button" title="Descargar tablas del workspace">
+                    <i class="fas fa-download"></i> <span class="btn-accion-text">Descargar registros</span>
                   </button>
                 </div>
                 <small class="form-text text-muted" id="stTablas"></small>
@@ -86,8 +86,8 @@ function pct($n, $d): int {
               <?php endif; ?>
               <div class="col-6 acciones-block-col">
                 <div class="acciones-block-actions">
-                  <button class="btn btn-accion-mant btn-accion-mant-secondary btn-block" id="btnClasificarModeracion" type="button" title="Clasificar imágenes pendientes con AWS Rekognition Content Moderation">
-                    <i class="fas fa-shield-alt btn-icon"></i> <span class="btn-accion-text">Clasificar moderación</span>
+                  <button class="btn btn-outline-info btn-sm btn-block" id="btnClasificarModeracion" type="button" title="Clasificar imágenes pendientes con AWS Rekognition Content Moderation">
+                    <i class="fas fa-shield-alt"></i> <span class="btn-accion-text">Clasificar moderación</span>
                   </button>
                 </div>
                 <small class="form-text text-muted" id="stModeracion"></small>
@@ -98,8 +98,8 @@ function pct($n, $d): int {
                 <span class="acciones-block-title"><i class="fas fa-tools"></i> Mantenimiento</span>
               </div>
               <div class="acciones-block-actions">
-                <button class="btn btn-accion-mant btn-accion-mant-secondary" id="btnReindex" type="button">
-                  <i class="fas fa-broom btn-icon"></i> Reindexar
+                <button class="btn btn-outline-info btn-sm" id="btnReindex" type="button">
+                  <i class="fas fa-broom"></i> Reindexar
                 </button>
               </div>
             </div>
@@ -327,6 +327,23 @@ function pct($n, $d): int {
   let clasificarModeracionRunning = false;
   let lastRefreshAccionesAt = 0;
   const REFRESH_ACCIONES_THROTTLE_MS = 2000;
+
+  function setIndexButtonIdle(btnOrId, type) {
+    const btn = typeof btnOrId === 'string' ? document.getElementById(btnOrId) : btnOrId;
+    if (!btn) return;
+    btn.classList.remove('ws-btn-processing');
+    const labels = { descargar: 'Descargar registros', moderacion: 'Clasificar moderación' };
+    const icons = { descargar: 'fa-download', moderacion: 'fa-shield-alt' };
+    btn.innerHTML = '<i class="fas ' + icons[type] + '"></i> <span class="btn-accion-text">' + labels[type] + '</span>';
+  }
+  function setIndexButtonProcessing(btnOrId, text) {
+    const btn = typeof btnOrId === 'string' ? document.getElementById(btnOrId) : btnOrId;
+    if (!btn) return;
+    btn.classList.add('ws-btn-processing');
+    const safe = (text || '—').replace(/</g, '&lt;');
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1" aria-hidden="true"></i> ' + safe;
+  }
+
   if (indexWorker && typeof window.APP_WORKSPACE === 'string' && window.APP_WORKSPACE) {
     indexWorker.onmessage = function (e) {
       const msg = e.data;
@@ -349,7 +366,9 @@ function pct($n, $d): int {
               if (elMod) elMod.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
             }
             const stTablasEl = document.getElementById('stTablas');
-            if (stTablasEl) setStatus(stTablasEl, 'neutral', 'Imágenes: ' + Number(ind.imagenes_total ?? 0).toLocaleString());
+            const imgText = 'Imágenes: ' + Number(ind.imagenes_total ?? 0).toLocaleString();
+            if (stTablasEl) setStatus(stTablasEl, 'neutral', imgText);
+            setIndexButtonProcessing('btnDescargarRegistros', imgText);
           } else if (typeof msg.data?.pendientes === 'number') {
             const elReg = document.getElementById('accionIndRegistrosDescarga');
             if (elReg) elReg.textContent = Number(msg.data.pendientes).toLocaleString();
@@ -361,8 +380,7 @@ function pct($n, $d): int {
         }
         if (msg.type === 'done') {
           autoTablasRunning = false;
-          const btnDesc = document.getElementById('btnDescargarRegistros');
-          if (btnDesc) { const t = btnDesc.querySelector('.btn-accion-text'); if (t) t.textContent = 'Descargar registros'; }
+          setIndexButtonIdle('btnDescargarRegistros', 'descargar');
           stopIndexAutoStatsPolling();
           setStatus(stTablas, 'neutral', 'Detenido');
           appendLog('info', 'Descarga detenida.');
@@ -389,13 +407,17 @@ function pct($n, $d): int {
               const elMod = document.getElementById('accionIndPorModerar');
               if (elMod) elMod.textContent = Number(ind.imagenes_pendientes_moderacion).toLocaleString();
             }
+            const modText = Number(data.procesadas ?? 0).toLocaleString() + ' ok, ' + Number(data.pendientes ?? ind.imagenes_pendientes_moderacion ?? 0).toLocaleString() + ' pend.';
             const stModEl = document.getElementById('stModeracion');
-            if (stModEl) setStatus(stModEl, 'neutral', Number(data.procesadas ?? 0).toLocaleString() + ' ok, ' + Number(data.pendientes ?? ind.imagenes_pendientes_moderacion ?? 0).toLocaleString() + ' pend.');
+            if (stModEl) setStatus(stModEl, 'neutral', modText);
+            setIndexButtonProcessing('btnClasificarModeracion', modText);
           } else if (typeof msg.data?.pendientes === 'number') {
             const elMod = document.getElementById('accionIndPorModerar');
             if (elMod) elMod.textContent = Number(msg.data.pendientes).toLocaleString();
+            const modTextAlt = '0 ok, ' + Number(msg.data.pendientes).toLocaleString() + ' pend.';
             const stModEl = document.getElementById('stModeracion');
-            if (stModEl) setStatus(stModEl, 'neutral', '0 ok, ' + Number(msg.data.pendientes).toLocaleString() + ' pend.');
+            if (stModEl) setStatus(stModEl, 'neutral', modTextAlt);
+            setIndexButtonProcessing('btnClasificarModeracion', modTextAlt);
             if (Date.now() - lastRefreshAccionesAt > REFRESH_ACCIONES_THROTTLE_MS) {
               lastRefreshAccionesAt = Date.now();
               refreshAccionesIndicadores();
@@ -404,8 +426,7 @@ function pct($n, $d): int {
         }
         if (msg.type === 'done') {
           clasificarModeracionRunning = false;
-          const btnMod = document.getElementById('btnClasificarModeracion');
-          if (btnMod) { const t = btnMod.querySelector('.btn-accion-text'); if (t) t.textContent = 'Clasificar moderación'; }
+          setIndexButtonIdle('btnClasificarModeracion', 'moderacion');
           const stMod = document.getElementById('stModeracion');
           if (stMod) stMod.textContent = 'Finalizado.';
           appendLog('info', 'Clasificación de moderación finalizada.');
@@ -1202,15 +1223,13 @@ function pct($n, $d): int {
       }
       if (clasificarModeracionRunning) {
         clasificarModeracionRunning = false;
-        const t = btnClasificarModeracion.querySelector('.btn-accion-text');
-        if (t) t.textContent = 'Clasificar moderación';
+        setIndexButtonIdle(btnClasificarModeracion, 'moderacion');
         if (stModeracion) stModeracion.textContent = 'Detenido.';
         indexWorker.postMessage({ type: 'remove', mode: 'classify', ws: window.APP_WORKSPACE });
         return;
       }
       clasificarModeracionRunning = true;
-      const t = btnClasificarModeracion.querySelector('.btn-accion-text');
-      if (t) t.textContent = 'Detener moderación';
+      setIndexButtonProcessing(btnClasificarModeracion, 'Clasificando…');
       if (stModeracion) stModeracion.textContent = 'Clasificando…';
       indexWorker.postMessage({ type: 'add', mode: 'classify', ws: window.APP_WORKSPACE });
     });
@@ -1560,8 +1579,8 @@ function pct($n, $d): int {
 
   function setBtnDescargarLabel(running) {
     if (!btnDescargarRegistros) return;
-    const t = btnDescargarRegistros.querySelector('.btn-accion-text');
-    if (t) t.textContent = running ? 'Detener descarga' : 'Descargar registros';
+    if (running) setIndexButtonProcessing(btnDescargarRegistros, 'Detener descarga');
+    else setIndexButtonIdle(btnDescargarRegistros, 'descargar');
   }
 
   async function setAutoTablas(on) {
