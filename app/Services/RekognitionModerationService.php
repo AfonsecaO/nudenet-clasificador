@@ -11,6 +11,9 @@ use Aws\Exception\AwsException;
  */
 class RekognitionModerationService
 {
+    /** Límite de Rekognition para image.bytes (5 MB) */
+    private const MAX_IMAGE_BYTES = 5242880;
+
     private const REQUESTED_MODEL_VERSION = 'V7_0';
     private const MAX_RETRIES = 3;
     private const RETRY_DELAY_MS = 1000;
@@ -85,9 +88,11 @@ class RekognitionModerationService
 
     /**
      * Convierte ruta o bytes a string de bytes de imagen (JPEG/PNG aceptados por Rekognition).
+     * Si el tamaño supera MAX_IMAGE_BYTES (5 MB), reduce la imagen antes de enviar.
      */
     private function imageToBytes($imagePathOrBytes): ?string
     {
+        $bytes = null;
         if (is_string($imagePathOrBytes)) {
             if (strlen($imagePathOrBytes) > 0 && strlen($imagePathOrBytes) < 4096 && is_file($imagePathOrBytes)) {
                 $path = $imagePathOrBytes;
@@ -100,14 +105,30 @@ class RekognitionModerationService
                     $path = $jpgPath;
                 }
                 $bytes = @file_get_contents($path);
-                return $bytes !== false ? $bytes : null;
+                if ($bytes === false) {
+                    return null;
+                }
+            } else {
+                $bytes = $imagePathOrBytes;
             }
-            return $imagePathOrBytes;
-        }
-        if (is_resource($imagePathOrBytes)) {
+        } elseif (is_resource($imagePathOrBytes)) {
             $bytes = stream_get_contents($imagePathOrBytes);
-            return $bytes !== false ? $bytes : null;
+            if ($bytes === false) {
+                return null;
+            }
         }
-        return null;
+        if ($bytes === null || $bytes === '') {
+            return null;
+        }
+        if (strlen($bytes) > self::MAX_IMAGE_BYTES) {
+            $reduced = ImageCompressor::shrinkToMaxBytes($bytes, self::MAX_IMAGE_BYTES);
+            if ($reduced !== null) {
+                return $reduced;
+            }
+            throw new \InvalidArgumentException(
+                'Imagen demasiado grande (máx. ' . (self::MAX_IMAGE_BYTES / 1048576) . ' MB) y no se pudo reducir.'
+            );
+        }
+        return $bytes;
     }
 }

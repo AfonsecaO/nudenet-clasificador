@@ -165,6 +165,120 @@ class ImageCompressor
     }
 
     /**
+     * Reduce la imagen a un tamaño en bytes ≤ $maxBytes (reescala y/o re-codifica a JPEG).
+     * Útil para cumplir límites de APIs (p. ej. Rekognition 5 MB).
+     *
+     * @param string $binary   Contenido binario de la imagen (JPEG/PNG/WebP/etc.)
+     * @param int    $maxBytes Límite máximo en bytes (ej. 5242880 para Rekognition)
+     * @return string|null     Binario JPEG con strlen ≤ $maxBytes, o null si no se pudo procesar
+     */
+    public static function shrinkToMaxBytes(string $binary, int $maxBytes): ?string
+    {
+        if ($maxBytes <= 0) {
+            return null;
+        }
+        if (strlen($binary) <= $maxBytes) {
+            return $binary;
+        }
+
+        $img = null;
+        $useImagick = false;
+
+        if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+            $img = @imagecreatefromstring($binary);
+        }
+        if ($img === false && extension_loaded('imagick') && class_exists(\Imagick::class)) {
+            $useImagick = true;
+        }
+        if ($img === false && !$useImagick) {
+            return null;
+        }
+
+        $maxIterations = 20;
+        $quality = 85;
+        $scale = 1.0;
+        $minQuality = 50;
+
+        for ($iter = 0; $iter < $maxIterations; $iter++) {
+            if ($useImagick) {
+                $out = self::shrinkToMaxBytesImagick($binary, $scale, $quality);
+            } else {
+                $out = self::shrinkToMaxBytesGd($img, $scale, $quality);
+            }
+            if ($out !== null && strlen($out) <= $maxBytes) {
+                if ($img !== null) {
+                    @imagedestroy($img);
+                }
+                return $out;
+            }
+            if ($out !== null && strlen($out) > $maxBytes) {
+                $scale *= 0.8;
+                if ($scale < 0.2) {
+                    $scale = 0.2;
+                    $quality = max($minQuality, $quality - 10);
+                }
+            }
+        }
+
+        if ($img !== null) {
+            @imagedestroy($img);
+        }
+        return null;
+    }
+
+    private static function shrinkToMaxBytesGd($img, float $scale, int $quality): ?string
+    {
+        $w = imagesx($img);
+        $h = imagesy($img);
+        if ($w <= 0 || $h <= 0) {
+            return null;
+        }
+        $nw = (int) max(1, round($w * $scale));
+        $nh = (int) max(1, round($h * $scale));
+        $dst = @imagecreatetruecolor($nw, $nh);
+        if ($dst === false) {
+            return null;
+        }
+        $ok = @imagecopyresampled($dst, $img, 0, 0, 0, 0, $nw, $nh, $w, $h);
+        if (!$ok) {
+            imagedestroy($dst);
+            return null;
+        }
+        ob_start();
+        @imagejpeg($dst, null, $quality);
+        imagedestroy($dst);
+        $out = ob_get_clean();
+        return $out !== false ? $out : null;
+    }
+
+    private static function shrinkToMaxBytesImagick(string $binary, float $scale, int $quality): ?string
+    {
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($binary);
+            $w = $im->getImageWidth();
+            $h = $im->getImageHeight();
+            if ($w <= 0 || $h <= 0) {
+                $im->clear();
+                $im->destroy();
+                return null;
+            }
+            $nw = (int) max(1, round($w * $scale));
+            $nh = (int) max(1, round($h * $scale));
+            $im->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1);
+            $im->setImageFormat('jpeg');
+            $im->setImageCompressionQuality($quality);
+            $im->stripImage();
+            $blob = $im->getImageBlob();
+            $im->clear();
+            $im->destroy();
+            return $blob !== '' ? $blob : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * Resetea el cache de configuración (útil en tests).
      */
     public static function resetConfigCache(): void
